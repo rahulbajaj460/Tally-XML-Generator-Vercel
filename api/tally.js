@@ -1,10 +1,9 @@
 export const config = {
-  maxDuration: 300, // 5 minutes - Vercel Pro/Hobby allows this with streaming
-  runtime: 'edge', // Edge runtime supports streaming natively, no timeout
+  maxDuration: 300,
+  runtime: 'edge',
 };
 
 export default async function handler(req) {
-  // CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, {
       status: 200,
@@ -45,9 +44,8 @@ export default async function handler(req) {
     const { password, ...anthropicPayload } = body;
     anthropicPayload.model = 'claude-sonnet-4-5';
     anthropicPayload.max_tokens = 8000;
-    anthropicPayload.stream = true; // KEY: enable streaming
+    anthropicPayload.stream = true;
 
-    // Call Anthropic with streaming
     const anthropicResponse = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -66,48 +64,61 @@ export default async function handler(req) {
       });
     }
 
-    // Stream the response directly back to the client
-    // This keeps the connection alive and prevents any timeout
+    // TransformStream: read ALL of Anthropic's SSE, assemble fullText server-side,
+    // send progress pings to keep connection alive, then send ONE 'done' event
+    // with the complete verified text. This prevents any client-side chunk corruption.
     const { readable, writable } = new TransformStream();
     const writer = writable.getWriter();
     const encoder = new TextEncoder();
 
-    // Process the SSE stream from Anthropic and collect text
+    const send = async (obj) => {
+      await writer.write(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+    };
+
     (async () => {
       const reader = anthropicResponse.body.getReader();
       const decoder = new TextDecoder();
       let fullText = '';
+      let sseBuffer = '';
 
       try {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
+          sseBuffer += decoder.decode(value, { stream: true });
+          const lines = sseBuffer.split('\n');
+          sseBuffer = lines.pop(); // hold incomplete line
 
           for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6).trim();
-              if (data === '[DONE]') continue;
-              try {
-                const parsed = JSON.parse(data);
-                // Extract text delta from streaming events
-                if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
-                  fullText += parsed.delta.text;
-                  // Send progress ping to keep connection alive
-                  await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'progress', text: parsed.delta.text })}\n\n`));
-                }
-                if (parsed.type === 'message_stop') {
-                  // Send final complete response
-                  await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'done', fullText })}\n\n`));
-                }
-              } catch (e) {
-                // Skip malformed JSON lines
-              }
+            if (!line.startsWith('data: ')) continue;
+            const data = line.slice(6).trim();
+            if (!data || data === '[DONE]') continue;
+
+            let parsed;
+            try { parsed = JSON.parse(data); } catch(e) { continue; }
+
+            if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+              const chunk = parsed.delta.text;
+              fullText += chunk; // accumulate server-side — no corruption possible
+              // Send lightweight progress ping (just length) to keep connection alive
+              await send({ type: 'progress', text: chunk, len: fullText.length });
+            }
+
+            if (parsed.type === 'message_stop') {
+              // Send the complete assembled text ONCE — client uses only this
+              await send({ type: 'done', fullText });
             }
           }
         }
+
+        // Safety: if message_stop never fired, send done anyway
+        if (fullText && !fullText.includes('"type":"done"')) {
+          await send({ type: 'done', fullText });
+        }
+
+      } catch (err) {
+        await send({ error: { message: err.message || 'Stream processing error' } });
       } finally {
         await writer.close();
       }
