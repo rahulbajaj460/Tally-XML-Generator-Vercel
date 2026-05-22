@@ -1,7 +1,0 @@
-{
-  "functions": {
-    "api/tally.js": {
-      "maxDuration": 60
-    }
-  }
-}
