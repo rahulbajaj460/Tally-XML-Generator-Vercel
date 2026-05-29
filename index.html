@@ -183,6 +183,33 @@
   }
   .toggle.on::after { left: 19px; }
 
+  /* Custom Instructions */
+  .instructions-box {
+    width: 100%; min-height: 90px;
+    padding: 0.75rem 0.9rem;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--r-sm); color: var(--text);
+    font-family: var(--font-body); font-size: 0.85rem;
+    outline: none; transition: border-color 0.2s;
+    resize: vertical; line-height: 1.5;
+  }
+  .instructions-box:focus { border-color: var(--accent2); }
+  .instructions-box::placeholder { color: var(--muted); }
+  .instructions-hint {
+    font-size: 0.72rem; color: var(--muted);
+    margin-top: 0.4rem; line-height: 1.5;
+  }
+  .instructions-examples {
+    display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem;
+  }
+  .instr-chip {
+    background: rgba(91,138,240,0.1); border: 1px solid rgba(91,138,240,0.25);
+    color: var(--accent2); font-size: 0.68rem; padding: 0.2rem 0.55rem;
+    border-radius: 20px; cursor: pointer; transition: all 0.15s;
+    font-family: var(--font-body);
+  }
+  .instr-chip:hover { background: rgba(91,138,240,0.2); }
+
   /* Upload zone */
   .upload-zone {
     border: 1.5px dashed var(--border); border-radius: var(--r-sm);
@@ -444,6 +471,23 @@
           <span class="file-remove" onclick="clearFile('ledger')">✕</span>
         </div>
         <input type="file" id="ledgerInput" accept=".pdf,.xlsx,.xls,.csv,.html" onchange="handleFile(event,'ledger')">
+
+        <label style="margin-top:1.3rem">Custom Classification Instructions <span style="color:var(--muted)">(optional)</span></label>
+        <div style="font-size:0.73rem;color:var(--muted);margin-bottom:0.5rem">Tell Claude how to classify specific transactions or ledgers</div>
+        <textarea
+          class="instructions-box"
+          id="customInstructions"
+          placeholder="e.g. Classify all credits to Suspense Account&#10;Map all bank charges to Bank Charges under Indirect Expenses&#10;All salary payments should go to Staff Costs ledger&#10;Rent payments → Rent Expense under Indirect Expenses"
+        ></textarea>
+        <div class="instructions-hint">💡 Be specific. These rules override the default AI classification.</div>
+        <div class="instructions-examples">
+          <span class="instr-chip" onclick="appendInstr('All credits → Suspense Account')">All credits → Suspense</span>
+          <span class="instr-chip" onclick="appendInstr('Bank charges → Bank Charges (Indirect Expenses)')">Bank Charges</span>
+          <span class="instr-chip" onclick="appendInstr('Salary payments → Staff Costs (Indirect Expenses)')">Salary → Staff Costs</span>
+          <span class="instr-chip" onclick="appendInstr('Rent payments → Rent Expense (Indirect Expenses)')">Rent Expense</span>
+          <span class="instr-chip" onclick="appendInstr('All debits → Sundry Creditors')">Debits → Sundry Creditors</span>
+          <span class="instr-chip" onclick="appendInstr('Insurance payments → Insurance Expense (Indirect Expenses)')">Insurance</span>
+        </div>
       </div>
     </div>
   </div>
@@ -503,6 +547,13 @@
 <script>
 // ── STATE ──
 const S = { docType: 'bank', mainFile: null, ledgerFile: null, xmlOutput: '', password: '' };
+
+function appendInstr(text) {
+  const el = document.getElementById('customInstructions');
+  const cur = el.value.trim();
+  el.value = cur ? cur + '\n' + text : text;
+  el.focus();
+}
 
 // ── PASSWORD SYSTEM ──
 // Simple client-side session (actual auth is on the Netlify function)
@@ -605,6 +656,7 @@ Rules:
 - Rent → Payment Voucher with ledger "Rent Expense"
 - Professional fees received → Receipt with "Professional Fees Income" or "Consulting Fees"
 - If ledger master provided, match to exact ledger names from it
+- If USER CLASSIFICATION RULES are provided in the user message, follow them strictly — they override all defaults above
 - Date format: YYYYMMDD (no slashes)
 - Company name exactly as provided
 Output ONLY valid Tally XML starting with <?xml or <ENVELOPE. No markdown, no explanation.`,
@@ -617,6 +669,7 @@ Rules:
 - Credit: Sales ledger for base amount
 - If VAT 5% detected or requested: Credit "Output VAT 5%" ledger separately
 - Use party name from invoice as ledger name
+- If USER CLASSIFICATION RULES are provided in the user message, follow them strictly — they override all defaults above
 - Date format: YYYYMMDD
 - Company name exactly as provided
 Output ONLY valid Tally XML starting with <?xml or <ENVELOPE. No markdown, no explanation.`,
@@ -629,6 +682,7 @@ Rules:
 - Debit: Purchase/Expense ledger for base amount
 - If VAT 5% detected or requested: Debit "Input VAT 5%" ledger separately
 - Use supplier name from invoice as ledger name
+- If USER CLASSIFICATION RULES are provided in the user message, follow them strictly — they override all defaults above
 - Date format: YYYYMMDD
 - Company name exactly as provided
 Output ONLY valid Tally XML starting with <?xml or <ENVELOPE. No markdown, no explanation.`
@@ -689,7 +743,11 @@ async function generate() {
 
     const vatNote = vatOn ? ' Apply UAE VAT 5% split where applicable.' : '';
     const trnNote = trnOn ? ` Include company TRN in narration where possible.` : '';
-    const instrText = `Company: "${company}" | Currency: ${currency}${vatNote}${trnNote}${ledgerCtx}\nReturn ONLY Tally XML.`;
+    const customInstr = document.getElementById('customInstructions').value.trim();
+    const customNote = customInstr
+      ? `\n\nUSER CLASSIFICATION RULES (STRICT — follow these exactly, they override defaults):\n${customInstr}`
+      : '';
+    const instrText = `Company: "${company}" | Currency: ${currency}${vatNote}${trnNote}${ledgerCtx}${customNote}\nReturn ONLY Tally XML.`;
 
     if (isPDF(S.mainFile)) {
       const b64 = await toBase64(S.mainFile);
