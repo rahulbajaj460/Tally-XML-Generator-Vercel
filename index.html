@@ -87,7 +87,6 @@
   /* ── MAIN APP ── */
   #app { display: none; max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
 
-  /* Header */
   .header {
     display: flex; align-items: center; justify-content: space-between;
     margin-bottom: 2.5rem; padding-bottom: 1.5rem;
@@ -101,10 +100,7 @@
     font-family: var(--font-display); font-weight: 800;
     font-size: 17px; color: #0d0f14; flex-shrink: 0;
   }
-  .header-title h1 {
-    font-family: var(--font-display); font-size: 1.15rem;
-    font-weight: 700; line-height: 1.2;
-  }
+  .header-title h1 { font-family: var(--font-display); font-size: 1.15rem; font-weight: 700; line-height: 1.2; }
   .header-title span { font-size: 0.78rem; color: var(--muted); }
   .badge-uae {
     background: rgba(232,200,106,0.12); border: 1px solid rgba(232,200,106,0.25);
@@ -120,22 +116,17 @@
   }
   .btn-lock:hover { border-color: var(--red); color: var(--red); }
 
-  /* Layout grid */
   .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.25rem; }
   @media (max-width: 700px) { .main-grid { grid-template-columns: 1fr; } }
 
-  /* Cards */
-  .card {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--r); padding: 1.5rem;
-  }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 1.5rem; }
   .card-label {
     font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em;
     text-transform: uppercase; color: var(--muted);
     margin-bottom: 1rem; font-family: var(--font-display);
+    display: flex; align-items: center; gap: 0.6rem;
   }
 
-  /* Inputs */
   input[type="text"], select {
     width: 100%; padding: 0.7rem 0.9rem;
     background: var(--surface2); border: 1px solid var(--border);
@@ -149,24 +140,18 @@
   label:first-child { margin-top: 0; }
   .required { color: var(--accent); }
 
-  /* Doc type selector */
   .doc-types { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.6rem; }
   .doc-type {
     background: var(--surface2); border: 1px solid var(--border);
     border-radius: var(--r-sm); padding: 0.9rem 0.7rem;
-    cursor: pointer; text-align: center; transition: all 0.2s;
-    user-select: none;
+    cursor: pointer; text-align: center; transition: all 0.2s; user-select: none;
   }
   .doc-type:hover { border-color: var(--accent2); }
-  .doc-type.active {
-    background: rgba(91,138,240,0.12);
-    border-color: var(--accent2);
-  }
+  .doc-type.active { background: rgba(91,138,240,0.12); border-color: var(--accent2); }
   .doc-type .icon { font-size: 1.5rem; margin-bottom: 0.35rem; }
   .doc-type .label { font-size: 0.78rem; font-weight: 600; color: var(--text); line-height: 1.3; }
   .doc-type .sub { font-size: 0.68rem; color: var(--muted); margin-top: 0.2rem; }
 
-  /* Toggles */
   .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0; }
   .toggle-row span { font-size: 0.82rem; color: var(--text); }
   .toggle {
@@ -176,17 +161,14 @@
   }
   .toggle.on { background: var(--accent2); }
   .toggle::after {
-    content: ''; position: absolute;
-    width: 14px; height: 14px; border-radius: 50%;
-    background: white; top: 3px; left: 3px;
-    transition: left 0.2s;
+    content: ''; position: absolute; width: 14px; height: 14px; border-radius: 50%;
+    background: white; top: 3px; left: 3px; transition: left 0.2s;
   }
   .toggle.on::after { left: 19px; }
 
-  /* Custom Instructions */
+  /* Custom Instructions — unchanged */
   .instructions-box {
-    width: 100%; min-height: 90px;
-    padding: 0.75rem 0.9rem;
+    width: 100%; min-height: 90px; padding: 0.75rem 0.9rem;
     background: var(--surface2); border: 1px solid var(--border);
     border-radius: var(--r-sm); color: var(--text);
     font-family: var(--font-body); font-size: 0.85rem;
@@ -195,35 +177,61 @@
   }
   .instructions-box:focus { border-color: var(--accent2); }
   .instructions-box::placeholder { color: var(--muted); }
-  .instructions-hint {
-    font-size: 0.72rem; color: var(--muted);
-    margin-top: 0.4rem; line-height: 1.5;
-  }
-  .instructions-examples {
-    display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem;
-  }
+  .instructions-hint { font-size: 0.72rem; color: var(--muted); margin-top: 0.4rem; line-height: 1.5; }
+  .instructions-examples { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
   .instr-chip {
     background: rgba(91,138,240,0.1); border: 1px solid rgba(91,138,240,0.25);
     color: var(--accent2); font-size: 0.68rem; padding: 0.2rem 0.55rem;
-    border-radius: 20px; cursor: pointer; transition: all 0.15s;
-    font-family: var(--font-body);
+    border-radius: 20px; cursor: pointer; transition: all 0.15s; font-family: var(--font-body);
   }
   .instr-chip:hover { background: rgba(91,138,240,0.2); }
 
-  /* Upload zone */
+  /* ── MULTI-FILE UPLOAD (NEW) ── */
   .upload-zone {
     border: 1.5px dashed var(--border); border-radius: var(--r-sm);
     padding: 1.5rem; text-align: center; cursor: pointer;
     transition: all 0.2s; background: var(--surface2);
   }
-  .upload-zone:hover, .upload-zone.drag {
-    border-color: var(--accent2);
-    background: rgba(91,138,240,0.06);
-  }
+  .upload-zone:hover, .upload-zone.drag { border-color: var(--accent2); background: rgba(91,138,240,0.06); }
   .upload-zone .up-icon { font-size: 1.8rem; margin-bottom: 0.5rem; }
   .upload-zone p { font-size: 0.82rem; color: var(--muted); }
   .upload-zone strong { color: var(--text); }
   .upload-zone .file-types { font-size: 0.72rem; color: var(--muted); margin-top: 0.3rem; }
+
+  /* File list */
+  .file-list-wrap { margin-top: 0.75rem; display: none; }
+  .file-list-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 0.4rem;
+  }
+  .file-list-header span { font-size: 0.76rem; color: var(--muted); }
+  .btn-clear-all {
+    font-size: 0.72rem; color: var(--red); background: none; border: none;
+    cursor: pointer; padding: 0.2rem 0.5rem; border-radius: 4px; transition: background 0.2s;
+  }
+  .btn-clear-all:hover { background: rgba(224,82,82,0.1); }
+  .file-list { display: flex; flex-direction: column; gap: 0.35rem; }
+  .file-item {
+    display: flex; align-items: center; gap: 0.5rem;
+    background: rgba(82,201,122,0.08); border: 1px solid rgba(82,201,122,0.2);
+    border-radius: var(--r-sm); padding: 0.45rem 0.75rem; font-size: 0.79rem;
+  }
+  .file-item .fi-icon { flex-shrink: 0; }
+  .file-item .fi-name { color: var(--green); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-item .fi-size { color: var(--muted); font-size: 0.7rem; flex-shrink: 0; }
+  .file-item .fi-remove {
+    cursor: pointer; color: var(--muted); font-size: 0.85rem; flex-shrink: 0;
+    width: 16px; height: 16px; display: flex; align-items: center; justify-content: center;
+    border-radius: 50%; transition: all 0.15s;
+  }
+  .file-item .fi-remove:hover { background: rgba(224,82,82,0.2); color: var(--red); }
+  .file-count-badge {
+    background: rgba(91,138,240,0.15); border: 1px solid rgba(91,138,240,0.3);
+    color: var(--accent2); font-size: 0.68rem; font-weight: 700;
+    padding: 0.15rem 0.5rem; border-radius: 20px; font-family: var(--font-display);
+  }
+
+  /* Ledger upload — unchanged style */
   .file-chosen {
     display: flex; align-items: center; gap: 0.5rem;
     background: rgba(82,201,122,0.1); border: 1px solid rgba(82,201,122,0.25);
@@ -233,16 +241,12 @@
   .file-remove { cursor: pointer; color: var(--muted); margin-left: auto; font-size: 1rem; }
   .file-remove:hover { color: var(--red); }
 
-  /* UAE options */
   .uae-section {
-    background: rgba(232,200,106,0.05);
-    border: 1px solid rgba(232,200,106,0.15);
-    border-radius: var(--r-sm); padding: 1rem 1.2rem;
-    margin-top: 0.5rem;
+    background: rgba(232,200,106,0.05); border: 1px solid rgba(232,200,106,0.15);
+    border-radius: var(--r-sm); padding: 1rem 1.2rem; margin-top: 0.5rem;
   }
   .uae-header { display: flex; align-items: center; gap: 0.5rem; font-size: 0.78rem; font-weight: 600; color: var(--accent); margin-bottom: 0.7rem; font-family: var(--font-display); letter-spacing: 0.05em; }
 
-  /* Generate button */
   .btn-generate {
     width: 100%; padding: 1rem;
     background: linear-gradient(135deg, var(--accent), #d4a830);
@@ -256,23 +260,14 @@
   .btn-generate:hover { opacity: 0.88; transform: translateY(-1px); }
   .btn-generate:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
 
-  /* Output area */
-  .output-card {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--r); overflow: hidden;
-  }
-  .output-header {
-    padding: 1rem 1.5rem; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; justify-content: space-between;
-  }
+  .output-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
+  .output-header { padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
   .output-header .title { font-family: var(--font-display); font-weight: 600; font-size: 0.9rem; }
   .output-actions { display: flex; gap: 0.5rem; }
   .btn-action {
-    padding: 0.4rem 0.85rem; border-radius: var(--r-sm);
-    font-size: 0.78rem; font-weight: 600; cursor: pointer;
-    transition: all 0.2s; border: 1px solid var(--border);
-    background: var(--surface2); color: var(--text);
-    font-family: var(--font-body);
+    padding: 0.4rem 0.85rem; border-radius: var(--r-sm); font-size: 0.78rem; font-weight: 600;
+    cursor: pointer; transition: all 0.2s; border: 1px solid var(--border);
+    background: var(--surface2); color: var(--text); font-family: var(--font-body);
   }
   .btn-action:hover { border-color: var(--accent2); color: var(--accent2); }
   .btn-action.primary { background: var(--accent2); color: white; border-color: var(--accent2); }
@@ -281,71 +276,35 @@
   .xml-pre {
     font-family: var(--font-mono); font-size: 0.75rem; line-height: 1.6;
     padding: 1.5rem; overflow: auto; max-height: 420px;
-    color: #a8b4d0; display: none;
-    background: #0a0c12;
-    white-space: pre;
+    color: #a8b4d0; display: none; background: #0a0c12; white-space: pre;
   }
-  .xml-tag { color: #5b8af0; }
-  .xml-attr { color: #e8c86a; }
-  .xml-val { color: #52c97a; }
-  .empty-state {
-    padding: 3rem 2rem; text-align: center; color: var(--muted);
-  }
+  .xml-tag { color: #5b8af0; } .xml-attr { color: #e8c86a; } .xml-val { color: #52c97a; }
+  .empty-state { padding: 3rem 2rem; text-align: center; color: var(--muted); }
   .empty-state .empty-icon { font-size: 2.5rem; margin-bottom: 1rem; }
   .empty-state p { font-size: 0.85rem; line-height: 1.7; }
 
-  /* Loader */
-  .loader-bar {
-    height: 3px; background: var(--border);
-    border-radius: 2px; overflow: hidden; margin: 0 1.5rem 1rem;
-    display: none;
-  }
-  .loader-bar-inner {
-    height: 100%; width: 30%;
-    background: linear-gradient(90deg, var(--accent2), var(--accent));
-    border-radius: 2px;
-    animation: barSlide 1.4s ease-in-out infinite;
-  }
-  @keyframes barSlide {
-    0% { transform: translateX(-100%); }
-    50% { transform: translateX(250%); }
-    100% { transform: translateX(-100%); }
-  }
-  .loader-text {
-    padding: 1rem 1.5rem; font-size: 0.82rem; color: var(--muted);
-    font-family: var(--font-mono); display: none;
-    animation: pulse 1.5s ease infinite;
-  }
+  .loader-bar { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; margin: 0 1.5rem 1rem; display: none; }
+  .loader-bar-inner { height: 100%; width: 30%; background: linear-gradient(90deg, var(--accent2), var(--accent)); border-radius: 2px; animation: barSlide 1.4s ease-in-out infinite; }
+  @keyframes barSlide { 0%{transform:translateX(-100%)} 50%{transform:translateX(250%)} 100%{transform:translateX(-100%)} }
+  .loader-text { padding: 1rem 1.5rem; font-size: 0.82rem; color: var(--muted); font-family: var(--font-mono); display: none; animation: pulse 1.5s ease infinite; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
 
-  /* How it works */
   .how-section { margin-top: 1.25rem; }
   .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8rem; }
   @media (max-width: 700px) { .steps { grid-template-columns: 1fr; } }
-  .step {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--r-sm); padding: 1.1rem;
-  }
-  .step-num {
-    width: 24px; height: 24px; background: var(--accent2);
-    border-radius: 50%; font-size: 0.72rem; font-weight: 700;
-    color: white; display: flex; align-items: center; justify-content: center;
-    margin-bottom: 0.6rem; font-family: var(--font-display);
-  }
+  .step { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 1.1rem; }
+  .step-num { width: 24px; height: 24px; background: var(--accent2); border-radius: 50%; font-size: 0.72rem; font-weight: 700; color: white; display: flex; align-items: center; justify-content: center; margin-bottom: 0.6rem; font-family: var(--font-display); }
   .step p { font-size: 0.8rem; color: var(--muted); line-height: 1.5; }
   .step strong { color: var(--text); display: block; margin-bottom: 0.2rem; font-size: 0.83rem; }
 
-  /* Footer */
   .footer { margin-top: 2.5rem; text-align: center; font-size: 0.75rem; color: var(--muted); border-top: 1px solid var(--border); padding-top: 1.5rem; }
   .footer a { color: var(--accent2); text-decoration: none; }
 
-  /* Success banner */
   .success-banner {
     background: rgba(82,201,122,0.1); border: 1px solid rgba(82,201,122,0.25);
     border-radius: var(--r-sm); padding: 0.7rem 1.2rem;
     font-size: 0.82rem; color: var(--green);
-    display: none; margin-top: 0.8rem; font-weight: 600;
-    align-items: center; gap: 0.5rem;
+    display: none; margin-top: 0.8rem; font-weight: 600; align-items: center; gap: 0.5rem;
   }
 
   input[type="file"] { display: none; }
@@ -384,11 +343,11 @@
 
   <div style="margin-bottom:1.5rem">
     <div style="font-family:var(--font-display);font-size:1.6rem;font-weight:800;letter-spacing:-0.02em">Tally XML Generator</div>
-    <div style="color:var(--muted);font-size:0.85rem;margin-top:0.3rem">Upload bank statements or invoices → Get Tally-ready voucher XML instantly</div>
+    <div style="color:var(--muted);font-size:0.85rem;margin-top:0.3rem">Upload one or multiple bank statements → Get a single merged Tally-ready XML instantly</div>
   </div>
 
   <div class="main-grid">
-    <!-- LEFT: Config -->
+    <!-- LEFT: Config — UNCHANGED -->
     <div>
       <div class="card">
         <div class="card-label">Company & Settings</div>
@@ -441,25 +400,39 @@
       </div>
     </div>
 
-    <!-- RIGHT: Upload -->
+    <!-- RIGHT: Upload — MULTI-FILE + LEDGER + CUSTOM INSTRUCTIONS -->
     <div>
       <div class="card">
-        <div class="card-label">Upload Document</div>
-        <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()"
+        <!-- Upload section label with live file count badge -->
+        <div class="card-label">
+          Upload Documents
+          <span class="file-count-badge" id="fileCountBadge" style="display:none"></span>
+        </div>
+
+        <!-- Drop zone — now accepts multiple -->
+        <div class="upload-zone" id="uploadZone"
+          onclick="document.getElementById('fileInput').click()"
           ondragover="event.preventDefault();this.classList.add('drag')"
           ondragleave="this.classList.remove('drag')"
           ondrop="handleDrop(event)">
-          <div class="up-icon">📄</div>
-          <p><strong>Drop or click to upload</strong></p>
-          <p class="file-types">Bank statement · Invoice · PDF or Excel / CSV</p>
+          <div class="up-icon">📂</div>
+          <p><strong>Drop files here or click to browse</strong></p>
+          <p style="margin-top:0.25rem;font-size:0.74rem;color:var(--accent2)">✦ Select multiple files — all merged into one XML</p>
+          <p class="file-types">PDF · Excel · CSV &nbsp;·&nbsp; Add more files anytime</p>
         </div>
-        <div class="file-chosen" id="fileChosen" style="display:none">
-          <span>📎</span>
-          <span id="fileName">file.pdf</span>
-          <span class="file-remove" onclick="clearFile('main')">✕</span>
-        </div>
-        <input type="file" id="fileInput" accept=".pdf,.xlsx,.xls,.csv" onchange="handleFile(event,'main')">
+        <!-- multiple attribute added -->
+        <input type="file" id="fileInput" accept=".pdf,.xlsx,.xls,.csv" multiple onchange="handleFiles(event)">
 
+        <!-- File list (shows when files added) -->
+        <div class="file-list-wrap" id="fileListWrap">
+          <div class="file-list-header">
+            <span id="fileListLabel">0 files</span>
+            <button class="btn-clear-all" onclick="clearAllFiles()">✕ Clear all</button>
+          </div>
+          <div class="file-list" id="fileList"></div>
+        </div>
+
+        <!-- Ledger Master — UNCHANGED -->
         <label style="margin-top:1.3rem">Tally Ledger Master <span style="color:var(--muted)">(optional)</span></label>
         <div style="font-size:0.73rem;color:var(--muted);margin-bottom:0.5rem">Display → List of Accounts → Ledgers → Alt+E → Export as Excel/HTML</div>
         <div class="upload-zone" style="padding:1rem" onclick="document.getElementById('ledgerInput').click()">
@@ -472,6 +445,7 @@
         </div>
         <input type="file" id="ledgerInput" accept=".pdf,.xlsx,.xls,.csv,.html" onchange="handleFile(event,'ledger')">
 
+        <!-- Custom Classification Instructions — UNCHANGED -->
         <label style="margin-top:1.3rem">Custom Classification Instructions <span style="color:var(--muted)">(optional)</span></label>
         <div style="font-size:0.73rem;color:var(--muted);margin-bottom:0.5rem">Tell Claude how to classify specific transactions or ledgers</div>
         <textarea
@@ -499,7 +473,7 @@
     ✅ Generation Complete
   </div>
 
-  <!-- Output -->
+  <!-- Output — UNCHANGED -->
   <div class="output-card" style="margin-top:1.25rem">
     <div class="output-header">
       <div class="title" id="outLabel">How it works</div>
@@ -514,12 +488,12 @@
       <pre class="xml-pre" id="xmlPre"></pre>
       <div class="empty-state" id="emptyState">
         <div class="empty-icon">🗂</div>
-        <p>Upload a document and click Generate<br>to create Tally-compatible XML</p>
+        <p>Upload one or more documents and click Generate<br>All files are combined into a single XML</p>
         <p style="margin-top:0.7rem;font-size:0.78rem">
           Bank Statement → Payment & Receipt Vouchers<br>
           Sales Invoices → Sales Vouchers<br>
           Purchase Invoices → Purchase Vouchers<br>
-          <span style="color:var(--accent)">VAT-aware · AED · UAE bank formats</span>
+          <span style="color:var(--accent)">VAT-aware · AED · UAE bank formats · Multi-file merge</span>
         </p>
       </div>
     </div>
@@ -530,7 +504,7 @@
     <div class="steps">
       <div class="step"><div class="step-num">1</div><p><strong>Enter company name</strong>Exact name as registered in your Tally company</p></div>
       <div class="step"><div class="step-num">2</div><p><strong>Select currency & type</strong>AED default · Bank / Sales / Purchase</p></div>
-      <div class="step"><div class="step-num">3</div><p><strong>Upload document</strong>PDF or Excel/CSV from any UAE bank</p></div>
+      <div class="step"><div class="step-num">3</div><p><strong>Upload documents</strong>One or multiple PDFs/CSVs — all merged into one XML</p></div>
       <div class="step"><div class="step-num">4</div><p><strong>Add ledger master</strong>Optional — improves ledger name accuracy</p></div>
       <div class="step"><div class="step-num">5</div><p><strong>Click Generate</strong>Claude AI parses & maps to Tally vouchers</p></div>
       <div class="step"><div class="step-num">6</div><p><strong>Import in Tally</strong>Gateway → Import Data → Vouchers → Select XML</p></div>
@@ -545,8 +519,8 @@
 </div>
 
 <script>
-// ── STATE ──
-const S = { docType: 'bank', mainFile: null, ledgerFile: null, xmlOutput: '', password: '' };
+// ── STATE ── mainFile → mainFiles array (only change to state)
+const S = { docType: 'bank', mainFiles: [], ledgerFile: null, xmlOutput: '', password: '' };
 
 function appendInstr(text) {
   const el = document.getElementById('customInstructions');
@@ -555,10 +529,7 @@ function appendInstr(text) {
   el.focus();
 }
 
-// ── PASSWORD SYSTEM ──
-// Simple client-side session (actual auth is on the Netlify function)
-const HINT_PASS = 'ABCapital2025'; // change this to match your TEAM_PASSWORD env var
-
+// ── AUTH — UNCHANGED ──
 function doLogin() {
   const pw = document.getElementById('pwInput').value.trim();
   if (!pw) return;
@@ -567,7 +538,6 @@ function doLogin() {
   document.getElementById('app').style.display = 'block';
   document.getElementById('loginError').style.display = 'none';
 }
-
 function logout() {
   S.password = '';
   document.getElementById('loginScreen').style.display = 'flex';
@@ -575,50 +545,94 @@ function logout() {
   document.getElementById('pwInput').value = '';
 }
 
-// ── DOC TYPE ──
+// ── DOC TYPE — UNCHANGED ──
 function setDocType(type, el) {
   S.docType = type;
   document.querySelectorAll('.doc-type').forEach(d => d.classList.remove('active'));
   el.classList.add('active');
 }
 
-// ── FILE HANDLING ──
-function handleFile(e, slot) {
-  const f = e.target.files[0]; if (!f) return;
-  assignFile(f, slot);
+// ── MULTI-FILE HANDLING (NEW) ──
+function handleFiles(e) {
+  addFiles(Array.from(e.target.files));
+  e.target.value = ''; // reset so same file can be re-added
 }
+
 function handleDrop(e) {
   e.preventDefault();
   document.getElementById('uploadZone').classList.remove('drag');
-  const f = e.dataTransfer.files[0]; if (!f) return;
-  assignFile(f, 'main');
+  const files = Array.from(e.dataTransfer.files).filter(f => /\.(pdf|xlsx|xls|csv)$/i.test(f.name));
+  addFiles(files);
 }
-function assignFile(f, slot) {
-  if (slot === 'main') {
-    S.mainFile = f;
-    document.getElementById('fileName').textContent = f.name;
-    document.getElementById('fileChosen').style.display = 'flex';
-  } else {
+
+function addFiles(newFiles) {
+  newFiles.forEach(f => {
+    // deduplicate by name + size
+    if (!S.mainFiles.some(ef => ef.name === f.name && ef.size === f.size)) {
+      S.mainFiles.push(f);
+    }
+  });
+  renderFileList();
+}
+
+function removeFile(idx) {
+  S.mainFiles.splice(idx, 1);
+  renderFileList();
+}
+
+function clearAllFiles() {
+  S.mainFiles = [];
+  renderFileList();
+}
+
+function renderFileList() {
+  const wrap = document.getElementById('fileListWrap');
+  const list = document.getElementById('fileList');
+  const badge = document.getElementById('fileCountBadge');
+  const label = document.getElementById('fileListLabel');
+  const n = S.mainFiles.length;
+
+  if (n === 0) {
+    wrap.style.display = 'none';
+    badge.style.display = 'none';
+    return;
+  }
+
+  wrap.style.display = 'block';
+  badge.style.display = 'inline-block';
+  badge.textContent = `${n} file${n > 1 ? 's' : ''}`;
+  label.textContent = `${n} file${n > 1 ? 's' : ''} selected`;
+
+  list.innerHTML = S.mainFiles.map((f, i) => `
+    <div class="file-item">
+      <span class="fi-icon">${/\.pdf$/i.test(f.name) ? '📄' : '📊'}</span>
+      <span class="fi-name" title="${f.name}">${f.name}</span>
+      <span class="fi-size">${(f.size / 1024).toFixed(0)} KB</span>
+      <span class="fi-remove" onclick="removeFile(${i})" title="Remove">✕</span>
+    </div>
+  `).join('');
+}
+
+// ── LEDGER — kept from original, just renamed slot check ──
+function handleFile(e, slot) {
+  const f = e.target.files[0]; if (!f) return;
+  if (slot === 'ledger') {
     S.ledgerFile = f;
     document.getElementById('ledgerName').textContent = f.name;
     document.getElementById('ledgerChosen').style.display = 'flex';
   }
 }
 function clearFile(slot) {
-  if (slot === 'main') {
-    S.mainFile = null;
-    document.getElementById('fileChosen').style.display = 'none';
-    document.getElementById('fileInput').value = '';
-  } else {
+  if (slot === 'ledger') {
     S.ledgerFile = null;
     document.getElementById('ledgerChosen').style.display = 'none';
     document.getElementById('ledgerInput').value = '';
   }
 }
 
-// ── HELPERS ──
+// ── HELPERS — UNCHANGED ──
 function isPDF(f) { return f && f.type === 'application/pdf'; }
-function isExcel(f) { return f && (f.name.endsWith('.xlsx') || f.name.endsWith('.xls') || f.name.endsWith('.csv')); }
+function isExcel(f) { return f && /\.(xlsx|xls|csv)$/i.test(f.name); }
 
 async function toBase64(file) {
   return new Promise((res, rej) => {
@@ -628,21 +642,15 @@ async function toBase64(file) {
     r.readAsDataURL(file);
   });
 }
-
 async function excelToText(file) {
   return new Promise((res) => {
     const r = new FileReader();
-    r.onload = (e) => {
-      try {
-        // Simple CSV text read
-        res(e.target.result);
-      } catch { res(''); }
-    };
+    r.onload = (e) => { try { res(e.target.result); } catch { res(''); } };
     r.readAsText(file);
   });
 }
 
-// ── TALLY XML INSTRUCTIONS ──
+// ── TALLY XML INSTRUCTIONS — UNCHANGED ──
 const INSTR = {
   bank: `You are a Tally ERP 9 / Tally Prime XML expert for UAE accounting.
 Parse the bank statement and generate valid Tally XML import format.
@@ -688,7 +696,7 @@ Rules:
 Output ONLY valid Tally XML starting with <?xml or <ENVELOPE. No markdown, no explanation.`
 };
 
-// ── GENERATE ──
+// ── GENERATE — updated for multi-file, rest unchanged ──
 async function generate() {
   const company = document.getElementById('companyName').value.trim();
   const currency = document.getElementById('currency').value;
@@ -696,29 +704,25 @@ async function generate() {
   const trnOn = document.getElementById('togTrn').classList.contains('on');
 
   if (!company) { alert('Please enter the Company Name exactly as in Tally.'); return; }
-  if (!S.mainFile) { alert('Please upload a document first.'); return; }
+  if (S.mainFiles.length === 0) { alert('Please upload at least one document.'); return; }
   if (!S.password) { logout(); return; }
+
+  const n = S.mainFiles.length;
 
   // UI: loading state
   document.getElementById('genBtn').disabled = true;
-  document.getElementById('genBtn').innerHTML = '⏳ Processing…';
+  document.getElementById('genBtn').innerHTML = `⏳ Processing ${n} file${n > 1 ? 's' : ''}…`;
   document.getElementById('loaderBar').style.display = 'block';
   document.getElementById('loaderText').style.display = 'block';
   document.getElementById('successBanner').style.display = 'none';
   document.getElementById('xmlPre').style.display = 'none';
   document.getElementById('emptyState').style.display = 'block';
+  document.getElementById('emptyState').innerHTML = '<div class="empty-icon">⏳</div><p>Reading and processing your files…</p>';
   document.getElementById('copyBtn').style.display = 'none';
   document.getElementById('dlBtn').style.display = 'none';
   document.getElementById('outLabel').textContent = 'Processing…';
 
-  // Ticker
-  const msgs = [
-    'Reading document with Claude AI…',
-    'Identifying transactions…',
-    'Mapping ledger names…',
-    'Generating Tally XML vouchers…',
-    'Almost done…'
-  ];
+  const msgs = ['Reading documents with Claude AI…', 'Identifying transactions…', 'Mapping ledger names…', 'Generating Tally XML vouchers…', 'Almost done…'];
   let ti = 0;
   const ticker = setInterval(() => {
     document.getElementById('loaderText').textContent = msgs[Math.min(ti++, msgs.length - 1)];
@@ -728,7 +732,7 @@ async function generate() {
     const sys = INSTR[S.docType];
     const contentParts = [];
 
-    // Ledger master context
+    // Ledger master — unchanged logic
     let ledgerCtx = '';
     if (S.ledgerFile) {
       if (isPDF(S.ledgerFile)) {
@@ -741,25 +745,41 @@ async function generate() {
       }
     }
 
+    // Build instruction text
     const vatNote = vatOn ? ' Apply UAE VAT 5% split where applicable.' : '';
-    const trnNote = trnOn ? ` Include company TRN in narration where possible.` : '';
+    const trnNote = trnOn ? ' Include company TRN in narration where possible.' : '';
     const customInstr = document.getElementById('customInstructions').value.trim();
     const customNote = customInstr
       ? `\n\nUSER CLASSIFICATION RULES (STRICT — follow these exactly, they override defaults):\n${customInstr}`
       : '';
-    const instrText = `Company: "${company}" | Currency: ${currency}${vatNote}${trnNote}${ledgerCtx}${customNote}\nReturn ONLY Tally XML.`;
+    const multiNote = n > 1
+      ? `\n\nIMPORTANT: You have received ${n} bank statement files. Combine ALL transactions from ALL files into ONE single Tally XML output with a single ENVELOPE wrapper. Do not create separate XMLs per file.`
+      : '';
+    const instrText = `Company: "${company}" | Currency: ${currency}${vatNote}${trnNote}${ledgerCtx}${customNote}${multiNote}\nReturn ONLY Tally XML.`;
 
-    if (isPDF(S.mainFile)) {
-      const b64 = await toBase64(S.mainFile);
-      contentParts.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } });
-      contentParts.push({ type: 'text', text: instrText });
-    } else if (isExcel(S.mainFile)) {
-      const txt = await excelToText(S.mainFile);
-      if (!txt.trim()) throw new Error('Could not read file. Try saving as CSV first.');
-      contentParts.push({ type: 'text', text: `FILE: ${S.mainFile.name}\n${txt.slice(0, 14000)}\n\n${instrText}` });
-    } else {
-      throw new Error('Unsupported file type. Please use PDF, Excel, or CSV.');
+    // Add all main files
+    for (let i = 0; i < S.mainFiles.length; i++) {
+      const f = S.mainFiles[i];
+      document.getElementById('loaderText').textContent = `Reading file ${i + 1} of ${n}: ${f.name}…`;
+
+      if (isPDF(f)) {
+        const b64 = await toBase64(f);
+        contentParts.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } });
+        if (n > 1) contentParts.push({ type: 'text', text: `Above is bank statement file ${i + 1} of ${n}: "${f.name}"` });
+      } else if (isExcel(f)) {
+        const txt = await excelToText(f);
+        if (!txt.trim()) throw new Error(`Could not read ${f.name}. Try saving as CSV first.`);
+        contentParts.push({ type: 'text', text: n > 1
+          ? `BANK STATEMENT FILE ${i + 1} of ${n} — "${f.name}":\n${txt.slice(0, 12000)}`
+          : `FILE: ${f.name}\n${txt.slice(0, 14000)}`
+        });
+      } else {
+        throw new Error(`Unsupported file type: ${f.name}`);
+      }
     }
+
+    // Final instruction text
+    contentParts.push({ type: 'text', text: instrText });
 
     const resp = await fetch('/api/tally', {
       method: 'POST',
@@ -780,9 +800,7 @@ async function generate() {
       throw new Error(msg);
     }
 
-    // ── STREAMING READER ──
-    // IMPORTANT: We only use the 'done' event's fullText which is assembled
-    // server-side to avoid any client-side chunk concatenation corruption.
+    // ── STREAMING READER — UNCHANGED ──
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let xml = '';
@@ -793,29 +811,20 @@ async function generate() {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop();
-
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         const raw = line.slice(6).trim();
         if (!raw) continue;
         let parsed;
         try { parsed = JSON.parse(raw); } catch(e) { continue; }
-
-        if (parsed.error) {
-          streamError = parsed.error.message || 'Stream error from server';
-          break;
-        }
-        // Progress: only update the counter display, do NOT build xml here
+        if (parsed.error) { streamError = parsed.error.message || 'Stream error from server'; break; }
         if (parsed.type === 'progress' && parsed.text) {
           progressLen += parsed.text.length;
-          document.getElementById('loaderText').textContent =
-            `Generating… ${progressLen} chars received`;
+          document.getElementById('loaderText').textContent = `Generating… ${progressLen} chars received`;
         }
-        // Done: use the server-assembled fullText — this is the reliable source
         if (parsed.type === 'done') {
           xml = (parsed.fullText || '').trim();
         }
@@ -824,41 +833,33 @@ async function generate() {
     }
 
     if (streamError) throw new Error(streamError);
-
-    // If 'done' event never fired (edge case), fallback is empty — tell user
     if (!xml) throw new Error('Stream completed but no final XML received. Please try again.');
 
-    // Strip markdown fences if Claude wrapped output
     xml = xml.replace(/^```(?:xml)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
 
-    // Debug — visible in browser DevTools console
     console.log('=== TALLY XML PREVIEW (first 600 chars) ===');
     console.log(xml.slice(0, 600));
     console.log('Total length:', xml.length);
 
     if (!xml) throw new Error('Empty XML after cleanup. Please try again.');
 
-    // Accept any valid Tally XML structure
     const looksLikeXML = xml.includes('<ENVELOPE') || xml.includes('<?xml') ||
                          xml.includes('<TALLYMESSAGE') || xml.includes('<VOUCHER');
-    if (!looksLikeXML) {
-      throw new Error('Non-XML response from Claude: ' + xml.slice(0, 300));
-    }
+    if (!looksLikeXML) throw new Error('Non-XML response from Claude: ' + xml.slice(0, 300));
 
     S.xmlOutput = xml;
     clearInterval(ticker);
 
-    // Count vouchers
     const vCount = (xml.match(/<VOUCHER /g) || []).length;
 
-    // Show output
     document.getElementById('loaderBar').style.display = 'none';
     document.getElementById('loaderText').style.display = 'none';
     document.getElementById('emptyState').style.display = 'none';
     const pre = document.getElementById('xmlPre');
     pre.innerHTML = colorize(esc(xml));
     pre.style.display = 'block';
-    document.getElementById('outLabel').innerHTML = `<span style="color:var(--green);font-weight:600">✅ ${vCount} voucher${vCount !== 1 ? 's' : ''} generated</span>`;
+    document.getElementById('outLabel').innerHTML =
+      `<span style="color:var(--green);font-weight:600">✅ ${vCount} voucher${vCount !== 1 ? 's' : ''} from ${n} file${n > 1 ? 's' : ''}</span>`;
     document.getElementById('copyBtn').style.display = 'inline-flex';
     document.getElementById('dlBtn').style.display = 'inline-flex';
     document.getElementById('successBanner').style.display = 'flex';
@@ -876,7 +877,7 @@ async function generate() {
   }
 }
 
-// ── XML COLORIZER ──
+// ── XML COLORIZER — UNCHANGED ──
 function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function colorize(s) {
   return s
@@ -886,7 +887,7 @@ function colorize(s) {
     .replace(/"([^"]*)"/g, '"<span class="xml-val">$1</span>"');
 }
 
-// ── COPY / DOWNLOAD ──
+// ── COPY / DOWNLOAD — updated filename includes file count ──
 function copyXML() {
   navigator.clipboard.writeText(S.xmlOutput).then(() => {
     const b = document.getElementById('copyBtn');
@@ -894,7 +895,6 @@ function copyXML() {
     setTimeout(() => b.textContent = '📋 Copy XML', 2000);
   });
 }
-
 function downloadXML() {
   if (!S.xmlOutput) return;
   const blob = new Blob([S.xmlOutput], { type: 'application/xml;charset=utf-8' });
@@ -902,7 +902,8 @@ function downloadXML() {
   const a = document.createElement('a');
   a.href = url;
   const co = document.getElementById('companyName').value.replace(/\s+/g,'-').toLowerCase() || 'company';
-  a.download = `tally-${S.docType}-${co}-${new Date().toISOString().slice(0,10)}.xml`;
+  const n = S.mainFiles.length;
+  a.download = `tally-${S.docType}-${co}-${n}file${n>1?'s':''}-${new Date().toISOString().slice(0,10)}.xml`;
   document.body.appendChild(a); a.click();
   document.body.removeChild(a); URL.revokeObjectURL(url);
 }
