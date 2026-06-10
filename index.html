@@ -343,7 +343,7 @@
 
   <div style="margin-bottom:1.5rem">
     <div style="font-family:var(--font-display);font-size:1.6rem;font-weight:800;letter-spacing:-0.02em">Tally XML Generator</div>
-    <div style="color:var(--muted);font-size:0.85rem;margin-top:0.3rem">Upload one or multiple bank statements → Get a single merged Tally-ready XML instantly</div>
+    <div style="color:var(--muted);font-size:0.85rem;margin-top:0.3rem">Upload one or multiple bank statements (any size) → Get a single merged Tally-ready XML instantly</div>
   </div>
 
   <div class="main-grid">
@@ -781,27 +781,50 @@ async function generate() {
     // Final instruction text
     contentParts.push({ type: 'text', text: instrText });
 
-    const resp = await fetch('/api/tally', {
+    // ── STEP 1: Get API key from server (password verified server-side) ──
+    // File never passes through Vercel — no size limit!
+    document.getElementById('loaderText').textContent = 'Authenticating…';
+    const authResp = await fetch('/api/tally', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: S.password })
+    });
+
+    if (authResp.status === 401) { logout(); throw new Error('Session expired. Please log in again.'); }
+    if (!authResp.ok) {
+      const t = await authResp.text();
+      let msg = 'Auth error ' + authResp.status;
+      try { msg = JSON.parse(t).error || msg; } catch(e) {}
+      throw new Error(msg);
+    }
+    const { apiKey } = await authResp.json();
+    if (!apiKey) throw new Error('Could not retrieve API key from server.');
+
+    // ── STEP 2: Call Anthropic directly from browser (no Vercel size limit) ──
+    document.getElementById('loaderText').textContent = 'Sending to Claude AI (direct connection)…';
+    const anthropicResp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
       body: JSON.stringify({
-        password: S.password,
+        model: 'claude-sonnet-4-5',
         max_tokens: 8000,
+        stream: true,
         system: sys,
         messages: [{ role: 'user', content: contentParts }]
       })
     });
 
-    if (resp.status === 401) { logout(); throw new Error('Session expired. Please log in again.'); }
-    if (!resp.ok) {
-      const t = await resp.text();
-      let msg = 'API error ' + resp.status;
-      try { msg = JSON.parse(t).error?.message || msg; } catch(e) {}
-      throw new Error(msg);
+    if (!anthropicResp.ok) {
+      const errData = await anthropicResp.json();
+      throw new Error(errData.error?.message || 'Anthropic API error ' + anthropicResp.status);
     }
 
-    // ── STREAMING READER — UNCHANGED ──
-    const reader = resp.body.getReader();
+    // ── STEP 3: Stream response directly from Anthropic ──
+    const reader = anthropicResp.body.getReader();
     const decoder = new TextDecoder();
     let xml = '';
     let progressLen = 0;
@@ -817,23 +840,21 @@ async function generate() {
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         const raw = line.slice(6).trim();
-        if (!raw) continue;
+        if (!raw || raw === '[DONE]') continue;
         let parsed;
         try { parsed = JSON.parse(raw); } catch(e) { continue; }
-        if (parsed.error) { streamError = parsed.error.message || 'Stream error from server'; break; }
-        if (parsed.type === 'progress' && parsed.text) {
-          progressLen += parsed.text.length;
-          document.getElementById('loaderText').textContent = `Generating… ${progressLen} chars received`;
-        }
-        if (parsed.type === 'done') {
-          xml = (parsed.fullText || '').trim();
+        if (parsed.type === 'error') { streamError = parsed.error?.message || 'Stream error'; break; }
+        if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+          xml += parsed.delta.text;
+          progressLen += parsed.delta.text.length;
+          document.getElementById('loaderText').textContent = `Generating… ${progressLen} chars`;
         }
       }
       if (streamError) break;
     }
 
     if (streamError) throw new Error(streamError);
-    if (!xml) throw new Error('Stream completed but no final XML received. Please try again.');
+    if (!xml) throw new Error('No XML received. Please try again.');
 
     xml = xml.replace(/^```(?:xml)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
 
