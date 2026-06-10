@@ -6,6 +6,7 @@
 <title>Tally XML Generator — AB Capital Services</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
   :root {
     --bg: #0d0f14;
@@ -308,6 +309,33 @@
   }
 
   input[type="file"] { display: none; }
+
+  /* Chunk progress */
+  .chunk-progress {
+    margin: 0 1.5rem 0.5rem; display: none;
+  }
+  .chunk-progress-label {
+    font-size: 0.75rem; color: var(--muted); font-family: var(--font-mono);
+    margin-bottom: 0.4rem;
+  }
+  .chunk-track {
+    height: 6px; background: var(--border); border-radius: 3px; overflow: hidden;
+  }
+  .chunk-fill {
+    height: 100%; background: linear-gradient(90deg, var(--accent2), var(--accent));
+    border-radius: 3px; transition: width 0.4s ease; width: 0%;
+  }
+  .chunk-steps {
+    display: flex; gap: 0.3rem; margin-top: 0.5rem; flex-wrap: wrap;
+  }
+  .chunk-step {
+    font-size: 0.68rem; padding: 0.15rem 0.5rem; border-radius: 10px;
+    border: 1px solid var(--border); color: var(--muted); font-family: var(--font-mono);
+    transition: all 0.3s;
+  }
+  .chunk-step.active { border-color: var(--accent2); color: var(--accent2); background: rgba(91,138,240,0.1); }
+  .chunk-step.done { border-color: var(--green); color: var(--green); background: rgba(82,201,122,0.1); }
+  .chunk-step.error { border-color: var(--red); color: var(--red); }
 </style>
 </head>
 <body>
@@ -484,6 +512,11 @@
     </div>
     <div class="loader-bar" id="loaderBar"><div class="loader-bar-inner"></div></div>
     <div class="loader-text" id="loaderText">Analysing document with Claude AI…</div>
+    <div class="chunk-progress" id="chunkProgress">
+      <div class="chunk-progress-label" id="chunkLabel">Processing chunk 1 of 3…</div>
+      <div class="chunk-track"><div class="chunk-fill" id="chunkFill"></div></div>
+      <div class="chunk-steps" id="chunkSteps"></div>
+    </div>
     <div class="output-body">
       <pre class="xml-pre" id="xmlPre"></pre>
       <div class="empty-state" id="emptyState">
@@ -634,6 +667,12 @@ function clearFile(slot) {
 function isPDF(f) { return f && f.type === 'application/pdf'; }
 function isExcel(f) { return f && /\.(xlsx|xls|csv)$/i.test(f.name); }
 
+// PDF.js setup
+if (typeof pdfjsLib !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+
 async function toBase64(file) {
   return new Promise((res, rej) => {
     const r = new FileReader();
@@ -643,30 +682,162 @@ async function toBase64(file) {
   });
 }
 
-// For large PDFs: read as base64 but warn if > 3MB encoded
-// Vercel limit is 4.5MB body — base64 adds 33% overhead
-// So raw file must be < ~3.3MB to be safe
-const VERCEL_SAFE_BYTES = 3.3 * 1024 * 1024; // 3.3MB raw = ~4.4MB base64
-
-async function toBase64Safe(file) {
-  if (file.size > VERCEL_SAFE_BYTES) {
-    throw new Error(
-      `PDF "${file.name}" is ${(file.size/1024/1024).toFixed(1)}MB — too large to send directly.\n\n` +
-      `Please either:\n` +
-      `• Download as CSV/Excel from your bank portal instead\n` +
-      `• Compress the PDF at ilovepdf.com or smallpdf.com first\n` +
-      `• Split into smaller date ranges and upload separately`
-    );
-  }
-  return toBase64(file);
-}
-
 async function excelToText(file) {
   return new Promise((res) => {
     const r = new FileReader();
     r.onload = (e) => { try { res(e.target.result); } catch { res(''); } };
     r.readAsText(file);
   });
+}
+
+// ── PDF CHUNKING ──
+// Vercel hard limit: 4.5MB body. base64 adds ~33% overhead.
+// So max raw PDF per chunk ≈ 3.3MB. We target ~2.5MB to be safe.
+const CHUNK_SIZE_BYTES = 2.5 * 1024 * 1024;
+
+// Extract text from all pages of a PDF using PDF.js
+async function extractPDFText(file) {
+  const arrayBuf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuf }).promise;
+  const pages = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const text = content.items.map(item => item.str).join(' ');
+    pages.push({ pageNum: i, text });
+  }
+  return pages;
+}
+
+// Split PDF into base64 chunks by byte size using PDF.js page extraction
+async function splitPDFIntoChunks(file) {
+  // If file is small enough, just send as-is
+  if (file.size <= CHUNK_SIZE_BYTES) {
+    const b64 = await toBase64(file);
+    return [{ type: 'pdf_b64', data: b64, label: file.name }];
+  }
+
+  // File is large — extract text via PDF.js and split into text chunks
+  document.getElementById('loaderText').textContent =
+    `Large PDF detected (${(file.size/1024/1024).toFixed(1)}MB) — extracting text…`;
+
+  let pages;
+  try {
+    pages = await extractPDFText(file);
+  } catch(e) {
+    throw new Error(`Could not extract text from ${file.name}. Try compressing or saving as CSV.`);
+  }
+
+  if (pages.length === 0) throw new Error(`No text found in ${file.name}. The PDF may be image-based (scanned). Please export as CSV from your bank.`);
+
+  // Group pages into chunks of ~40 pages each (typical bank statement)
+  const PAGES_PER_CHUNK = 40;
+  const chunks = [];
+  for (let i = 0; i < pages.length; i += PAGES_PER_CHUNK) {
+    const slice = pages.slice(i, i + PAGES_PER_CHUNK);
+    const text = slice.map(p => `--- Page ${p.pageNum} ---\n${p.text}`).join('\n\n');
+    chunks.push({
+      type: 'text',
+      data: text,
+      label: `${file.name} (pages ${slice[0].pageNum}–${slice[slice.length-1].pageNum})`
+    });
+  }
+  return chunks;
+}
+
+// ── CALL API FOR ONE CHUNK ──
+async function processChunk(contentParts, sys, password) {
+  const resp = await fetch('/api/tally', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      password,
+      max_tokens: 8000,
+      system: sys,
+      messages: [{ role: 'user', content: contentParts }]
+    })
+  });
+
+  if (resp.status === 401) { logout(); throw new Error('Session expired.'); }
+  if (!resp.ok) {
+    const t = await resp.text();
+    let msg = 'API error ' + resp.status;
+    try { msg = JSON.parse(t).error?.message || msg; } catch(e) {}
+    throw new Error(msg);
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let xml = '', progressLen = 0, buffer = '', streamError = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const raw = line.slice(6).trim();
+      if (!raw) continue;
+      let parsed;
+      try { parsed = JSON.parse(raw); } catch(e) { continue; }
+      if (parsed.error) { streamError = parsed.error.message || 'Stream error'; break; }
+      if (parsed.type === 'progress' && parsed.text) {
+        progressLen += parsed.text.length;
+        document.getElementById('loaderText').textContent = `Generating… ${progressLen} chars`;
+      }
+      if (parsed.type === 'done') xml = (parsed.fullText || '').trim();
+    }
+    if (streamError) break;
+  }
+
+  if (streamError) throw new Error(streamError);
+  return xml;
+}
+
+// ── MERGE MULTIPLE XML RESULTS INTO ONE ENVELOPE ──
+function mergeXMLResults(xmlParts) {
+  const allVouchers = [];
+  let company = '';
+
+  for (const xml of xmlParts) {
+    if (!xml) continue;
+    const clean = xml.replace(/^```(?:xml)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
+
+    // Extract company name from first result
+    if (!company) {
+      const m = clean.match(/<SVCURRENTCOMPANY>([^<]+)<\/SVCURRENTCOMPANY>/);
+      if (m) company = m[1];
+    }
+
+    // Extract all TALLYMESSAGE blocks
+    const msgs = clean.match(/<TALLYMESSAGE[\s\S]*?<\/TALLYMESSAGE>/g) || [];
+    allVouchers.push(...msgs);
+  }
+
+  if (allVouchers.length === 0) return xmlParts[0] || '';
+
+  // Wrap in single ENVELOPE
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<ENVELOPE>
+<HEADER>
+<TALLYREQUEST>Import Data</TALLYREQUEST>
+</HEADER>
+<BODY>
+<IMPORTDATA>
+<REQUESTDESC>
+<REPORTNAME>Vouchers</REPORTNAME>
+<STATICVARIABLES>
+<SVCURRENTCOMPANY>${company}</SVCURRENTCOMPANY>
+</STATICVARIABLES>
+</REQUESTDESC>
+<REQUESTDATA>
+${allVouchers.join('\n')}
+</REQUESTDATA>
+</IMPORTDATA>
+</BODY>
+</ENVELOPE>`;
 }
 
 // ── TALLY XML INSTRUCTIONS — UNCHANGED ──
@@ -751,17 +922,11 @@ async function generate() {
     const sys = INSTR[S.docType];
     const contentParts = [];
 
-    // Ledger master — unchanged logic
+    // Ledger master — text only in instrText; PDF handled per-chunk
     let ledgerCtx = '';
-    if (S.ledgerFile) {
-      if (isPDF(S.ledgerFile)) {
-        const lb64 = await toBase64Safe(S.ledgerFile);
-        contentParts.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: lb64 } });
-        contentParts.push({ type: 'text', text: 'Above is the Tally Ledger Master. Note exact ledger names.' });
-      } else {
-        const lt = await excelToText(S.ledgerFile);
-        ledgerCtx = `\nLedger Master:\n${lt.slice(0, 3000)}`;
-      }
+    if (S.ledgerFile && !isPDF(S.ledgerFile)) {
+      const lt = await excelToText(S.ledgerFile);
+      if (lt.trim()) ledgerCtx = `\nLedger Master:\n${lt.slice(0, 3000)}`;
     }
 
     // Build instruction text
@@ -771,88 +936,99 @@ async function generate() {
     const customNote = customInstr
       ? `\n\nUSER CLASSIFICATION RULES (STRICT — follow these exactly, they override defaults):\n${customInstr}`
       : '';
-    const multiNote = n > 1
-      ? `\n\nIMPORTANT: You have received ${n} bank statement files. Combine ALL transactions from ALL files into ONE single Tally XML output with a single ENVELOPE wrapper. Do not create separate XMLs per file.`
-      : '';
-    const instrText = `Company: "${company}" | Currency: ${currency}${vatNote}${trnNote}${ledgerCtx}${customNote}${multiNote}\nReturn ONLY Tally XML.`;
+    const instrText = `Company: "${company}" | Currency: ${currency}${vatNote}${trnNote}${ledgerCtx}${customNote}\nReturn ONLY Tally XML.`;
 
-    // Add all main files
-    for (let i = 0; i < S.mainFiles.length; i++) {
-      const f = S.mainFiles[i];
-      document.getElementById('loaderText').textContent = `Reading file ${i + 1} of ${n}: ${f.name}…`;
+    // ── BUILD ALL CHUNKS ACROSS ALL FILES ──
+    const allChunks = [];
+    for (let fi = 0; fi < S.mainFiles.length; fi++) {
+      const f = S.mainFiles[fi];
+      document.getElementById('loaderText').textContent = `Preparing ${f.name}…`;
 
+      let fileChunks;
       if (isPDF(f)) {
-        const b64 = await toBase64Safe(f);
-        contentParts.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } });
-        if (n > 1) contentParts.push({ type: 'text', text: `Above is bank statement file ${i + 1} of ${n}: "${f.name}"` });
+        fileChunks = await splitPDFIntoChunks(f);
       } else if (isExcel(f)) {
         const txt = await excelToText(f);
         if (!txt.trim()) throw new Error(`Could not read ${f.name}. Try saving as CSV first.`);
-        contentParts.push({ type: 'text', text: n > 1
-          ? `BANK STATEMENT FILE ${i + 1} of ${n} — "${f.name}":\n${txt.slice(0, 12000)}`
-          : `FILE: ${f.name}\n${txt.slice(0, 14000)}`
-        });
+        const lines = txt.split('\n');
+        const LINES_PER_CHUNK = 800;
+        if (lines.length <= LINES_PER_CHUNK) {
+          fileChunks = [{ type: 'text', data: txt.slice(0, 14000), label: f.name }];
+        } else {
+          fileChunks = [];
+          for (let i = 0; i < lines.length; i += LINES_PER_CHUNK) {
+            const slice = lines.slice(i, i + LINES_PER_CHUNK).join('\n');
+            fileChunks.push({ type: 'text', data: slice, label: `${f.name} (rows ${i+1}–${Math.min(i+LINES_PER_CHUNK, lines.length)})` });
+          }
+        }
       } else {
-        throw new Error(`Unsupported file type: ${f.name}`);
+        throw new Error(`Unsupported file: ${f.name}`);
+      }
+      fileChunks.forEach((c, ci) => allChunks.push({ fi, ci, ...c }));
+    }
+
+    const totalChunks = allChunks.length;
+
+    // Show chunk progress UI if multiple chunks
+    if (totalChunks > 1) {
+      document.getElementById('chunkProgress').style.display = 'block';
+      document.getElementById('chunkSteps').innerHTML = allChunks.map((c, i) =>
+        `<span class="chunk-step" id="cs_${i}" title="${c.label}">Chunk ${i+1}</span>`
+      ).join('');
+    }
+
+    // ── PROCESS EACH CHUNK ──
+    const xmlParts = [];
+    for (let ci = 0; ci < allChunks.length; ci++) {
+      const chunk = allChunks[ci];
+
+      if (totalChunks > 1) {
+        document.getElementById('chunkLabel').textContent =
+          `Processing chunk ${ci+1} of ${totalChunks}: ${chunk.label}`;
+        document.getElementById('chunkFill').style.width =
+          `${Math.round((ci / totalChunks) * 100)}%`;
+        if (ci > 0) { const p = document.getElementById('cs_'+(ci-1)); if(p) p.className='chunk-step done'; }
+        const cur = document.getElementById('cs_'+ci);
+        if (cur) cur.className = 'chunk-step active';
+      }
+
+      const chunkParts = [];
+
+      // Add PDF ledger to first chunk only
+      if (ci === 0 && S.ledgerFile && isPDF(S.ledgerFile)) {
+        const lb64 = await toBase64(S.ledgerFile);
+        chunkParts.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: lb64 } });
+        chunkParts.push({ type: 'text', text: 'Above is the Tally Ledger Master. Use exact ledger names from it.' });
+      }
+
+      if (chunk.type === 'pdf_b64') {
+        chunkParts.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: chunk.data } });
+        chunkParts.push({ type: 'text', text: instrText });
+      } else {
+        const chunkNote = totalChunks > 1
+          ? `\n\nNOTE: This is part ${ci+1} of ${totalChunks}. Output ONLY the TALLYMESSAGE voucher blocks for transactions in THIS data. Do NOT include ENVELOPE/HEADER/BODY wrappers — those will be added during merge.`
+          : '';
+        const multiFileNote = n > 1
+          ? `\n\nIMPORTANT: Combine ALL transactions from ALL files into ONE XML.`
+          : '';
+        chunkParts.push({ type: 'text', text: `BANK STATEMENT DATA — ${chunk.label}:\n${chunk.data}\n\n${instrText}${chunkNote}${multiFileNote}` });
+      }
+
+      const chunkXML = await processChunk(chunkParts, sys, S.password);
+      if (chunkXML) xmlParts.push(chunkXML);
+
+      if (ci === totalChunks - 1) {
+        document.getElementById('chunkFill').style.width = '100%';
+        const last = document.getElementById('cs_'+ci); if(last) last.className='chunk-step done';
       }
     }
 
-    // Final instruction text
-    contentParts.push({ type: 'text', text: instrText });
+    if (xmlParts.length === 0) throw new Error('No XML generated. Please try again.');
 
-    const resp = await fetch('/api/tally', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        password: S.password,
-        max_tokens: 8000,
-        system: sys,
-        messages: [{ role: 'user', content: contentParts }]
-      })
-    });
-
-    if (resp.status === 401) { logout(); throw new Error('Session expired. Please log in again.'); }
-    if (!resp.ok) {
-      const t = await resp.text();
-      let msg = 'API error ' + resp.status;
-      try { msg = JSON.parse(t).error?.message || msg; } catch(e) {}
-      throw new Error(msg);
-    }
-
-    // ── STREAMING READER — UNCHANGED ──
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let xml = '';
-    let progressLen = 0;
-    let buffer = '';
-    let streamError = null;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const raw = line.slice(6).trim();
-        if (!raw) continue;
-        let parsed;
-        try { parsed = JSON.parse(raw); } catch(e) { continue; }
-        if (parsed.error) { streamError = parsed.error.message || 'Stream error from server'; break; }
-        if (parsed.type === 'progress' && parsed.text) {
-          progressLen += parsed.text.length;
-          document.getElementById('loaderText').textContent = `Generating… ${progressLen} chars received`;
-        }
-        if (parsed.type === 'done') {
-          xml = (parsed.fullText || '').trim();
-        }
-      }
-      if (streamError) break;
-    }
-
-    if (streamError) throw new Error(streamError);
-    if (!xml) throw new Error('Stream completed but no final XML received. Please try again.');
+    // ── MERGE CHUNKS ──
+    document.getElementById('loaderText').textContent = 'Merging results…';
+    let xml = totalChunks > 1 ? mergeXMLResults(xmlParts) : xmlParts[0];
+    xml = (xml || '').replace(/^```(?:xml)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
 
     xml = xml.replace(/^```(?:xml)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
 
