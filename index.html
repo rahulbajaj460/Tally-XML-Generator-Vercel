@@ -693,7 +693,7 @@ async function excelToText(file) {
 // ── PDF CHUNKING ──
 // Vercel hard limit: 4.5MB body. base64 adds ~33% overhead.
 // So max raw PDF per chunk ≈ 3.3MB. We target ~2.5MB to be safe.
-const CHUNK_SIZE_BYTES = 2.5 * 1024 * 1024;
+// CHUNK_SIZE_BYTES removed — all PDFs now go through page-based text extraction
 
 // Extract text from all pages of a PDF using PDF.js
 async function extractPDFText(file) {
@@ -709,17 +709,14 @@ async function extractPDFText(file) {
   return pages;
 }
 
-// Split PDF into base64 chunks by byte size using PDF.js page extraction
-async function splitPDFIntoChunks(file) {
-  // If file is small enough, just send as-is
-  if (file.size <= CHUNK_SIZE_BYTES) {
-    const b64 = await toBase64(file);
-    return [{ type: 'pdf_b64', data: b64, label: file.name }];
-  }
+// Always extract text from PDFs and chunk by page count.
+// Voucher count (not file byte-size) drives output size, so even small
+// PDFs with many transactions need page-based chunking.
+const PAGES_PER_CHUNK = 2; // ~15-20 vouchers/chunk — safe under token limits
 
-  // File is large — extract text via PDF.js and split into text chunks
+async function splitPDFIntoChunks(file) {
   document.getElementById('loaderText').textContent =
-    `Large PDF detected (${(file.size/1024/1024).toFixed(1)}MB) — extracting text…`;
+    `Extracting text from ${file.name}…`;
 
   let pages;
   try {
@@ -728,10 +725,16 @@ async function splitPDFIntoChunks(file) {
     throw new Error(`Could not extract text from ${file.name}. Try compressing or saving as CSV.`);
   }
 
-  if (pages.length === 0) throw new Error(`No text found in ${file.name}. The PDF may be image-based (scanned). Please export as CSV from your bank.`);
+  if (pages.length === 0) {
+    throw new Error(`No text found in ${file.name}. The PDF may be image-based (scanned). Please export as CSV from your bank.`);
+  }
 
-  // Group pages into chunks of ~40 pages each (typical bank statement)
-  const PAGES_PER_CHUNK = 2; // smaller chunks = output stays well under token limit per chunk
+  // Single-page PDFs: still send as one chunk (no point splitting)
+  if (pages.length === 1) {
+    const text = `--- Page 1 ---\n${pages[0].text}`;
+    return [{ type: 'text', data: text, label: `${file.name} (page 1)` }];
+  }
+
   const chunks = [];
   for (let i = 0; i < pages.length; i += PAGES_PER_CHUNK) {
     const slice = pages.slice(i, i + PAGES_PER_CHUNK);
