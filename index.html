@@ -731,7 +731,7 @@ async function splitPDFIntoChunks(file) {
   if (pages.length === 0) throw new Error(`No text found in ${file.name}. The PDF may be image-based (scanned). Please export as CSV from your bank.`);
 
   // Group pages into chunks of ~40 pages each (typical bank statement)
-  const PAGES_PER_CHUNK = 15; // smaller chunks = output stays well under token limit per chunk
+  const PAGES_PER_CHUNK = 4; // smaller chunks = output stays well under token limit per chunk
   const chunks = [];
   for (let i = 0; i < pages.length; i += PAGES_PER_CHUNK) {
     const slice = pages.slice(i, i + PAGES_PER_CHUNK);
@@ -752,7 +752,7 @@ async function processChunk(contentParts, sys, password) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       password,
-      max_tokens: 16000,
+      max_tokens: 32000,
       system: sys,
       messages: [{ role: 'user', content: contentParts }]
     })
