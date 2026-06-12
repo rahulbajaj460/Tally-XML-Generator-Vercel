@@ -841,23 +841,78 @@ function mergeXMLResults(xmlParts, companyName) {
 
   const allBlocks = [...ledgerBlocks.values(), ...renumbered];
 
-  // Normalize known ledger name variants across all blocks for consistency
-  const NORMALIZE_MAP = {
-    'RAK Bank Current Account': 'RAK Bank',
-    'RAK Bank A/C 0373532428001': 'RAK Bank',
-    'RAK Bank - RAKBANK Current A/c': 'RAK Bank',
-    'RAKBANK Current A/c': 'RAK Bank',
-    'RAKBANK Current Account': 'RAK Bank',
-    'Cash in Hand': 'Cash',
-    'Cash In Hand': 'Cash',
-    'Cash-in-Hand': 'Cash',
-    'SALIM MOHAMMED MAZAR ALI': 'Salim Mohammed Mazar Ali'
-  };
+  // ── GENERIC LEDGER NAME NORMALIZATION ──
+  // Collapses near-duplicate ledger names (case variants, account-number/suffix
+  // variants) into one canonical form, without hardcoding any specific bank/
+  // vendor/person name. Works by comparing "core keys" (lowercase, alphanumeric
+  // only) and grouping names where one core key is a prefix of another.
   let merged = allBlocks.join('\n');
-  for (const [variant, canonical] of Object.entries(NORMALIZE_MAP)) {
-    if (variant === canonical) continue;
-    merged = merged.split(`>${variant}<`).join(`>${canonical}<`)
-                    .split(`"${variant}"`).join(`"${canonical}"`);
+  {
+    const coreKey = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    // 1. Collect every ledger name used (from LEDGERNAME tags and LEDGER NAME="" attrs)
+    const allNames = [];
+    const collectRegexes = [
+      /<LEDGERNAME>([^<]+)<\/LEDGERNAME>/g,
+      /<LEDGER NAME="([^"]+)"/g
+    ];
+    for (const re of collectRegexes) {
+      let m;
+      while ((m = re.exec(merged)) !== null) allNames.push(m[1]);
+    }
+
+    // 2. Group raw names by their core key
+    const byKey = new Map(); // coreKey -> Set of raw names
+    for (const name of allNames) {
+      const k = coreKey(name);
+      if (!k) continue;
+      if (!byKey.has(k)) byKey.set(k, new Set());
+      byKey.get(k).add(name);
+    }
+
+    // 3. Merge groups where one key is a prefix of another (shortest key wins as group anchor)
+    const sortedKeys = [...byKey.keys()].sort((a, b) => a.length - b.length);
+    const repOf = new Map(); // coreKey -> representative coreKey
+    for (const k of sortedKeys) {
+      if (repOf.has(k)) continue;
+      let rep = k;
+      for (const existingRep of new Set(repOf.values())) {
+        if (k.startsWith(existingRep) || existingRep.startsWith(k)) { rep = existingRep; break; }
+      }
+      repOf.set(k, rep);
+    }
+    const groups = new Map(); // rep -> Set of raw names
+    for (const [k, names] of byKey.entries()) {
+      const rep = repOf.get(k);
+      if (!groups.has(rep)) groups.set(rep, new Set());
+      for (const n of names) groups.get(rep).add(n);
+    }
+
+    // 4. For each group with >1 distinct name, pick a canonical (prefer non-ALLCAPS, then shortest)
+    const VARIANT_MAP = {};
+    for (const names of groups.values()) {
+      if (names.size <= 1) continue;
+      const arr = [...names];
+      let canonical = arr[0];
+      for (const n of arr.slice(1)) {
+        const canIsAllCaps = canonical === canonical.toUpperCase() && /[A-Z]/.test(canonical);
+        const nIsAllCaps = n === n.toUpperCase() && /[A-Z]/.test(n);
+        if (canIsAllCaps && !nIsAllCaps) canonical = n;
+        else if (!canIsAllCaps && !nIsAllCaps && n.length < canonical.length) canonical = n;
+        else if (canIsAllCaps && nIsAllCaps && n.length < canonical.length) canonical = n;
+      }
+      for (const n of arr) {
+        if (n !== canonical) VARIANT_MAP[n] = canonical;
+      }
+    }
+
+    // 5. Apply replacements (longest variant strings first to avoid partial-overlap issues)
+    const sortedVariants = Object.keys(VARIANT_MAP).sort((a, b) => b.length - a.length);
+    for (const variant of sortedVariants) {
+      const canonical = VARIANT_MAP[variant];
+      merged = merged.split(`>${variant}<`).join(`>${canonical}<`)
+                      .split(`"${variant}"`).join(`"${canonical}"`);
+    }
   }
 
   // Re-dedupe ledger creation blocks after normalization (keep first occurrence only)
@@ -917,6 +972,7 @@ const INSTR = {
 - Debit entries (money OUT) → VCHTYPE="Payment" and VOUCHERTYPENAME="Payment"
 - Transfers between the company's own bank/cash accounts → VCHTYPE="Contra" and VOUCHERTYPENAME="Contra"
 - CRITICAL: VCHTYPE and VOUCHERTYPENAME must be EXACTLY one of "Payment", "Receipt", "Contra" — NEVER append the word "Voucher" (e.g. "Payment Voucher" is WRONG; use "Payment")
+- CONTRA — narrow definition: use VCHTYPE="Contra" ONLY for genuine self-transfers between the company's own accounts — e.g. "CASH DEPOSIT", "ATM CASH DEPOSIT", "CASH WITHDRAWAL", "FUNDS TRANSFER TO OWN ACCOUNT", "TRANSFER BETWEEN A/C". If the transaction has any external party name, supplier, customer, or purchase/sale description — even if money moves between bank and cash — it is a Payment or Receipt, NOT Contra. When uncertain, prefer Payment/Receipt over Contra.
 - VAT payments → "VAT Payable"
 - Salary payments → "Salaries & Wages"
 - Bank/forex charges → "Bank Charges" (PARENT: Indirect Expenses)
@@ -924,6 +980,7 @@ const INSTR = {
 - Professional fees received → "Professional Fees Income" or "Consulting Fees"
 - Loan received from a named individual/entity → create that person/entity as a ledger under "Unsecured Loans" and use as PARTYLEDGERNAME — do NOT dump to Suspense Account if a name is identifiable
 - Only use "Suspense Account" when the transaction description gives genuinely no identifiable counterparty
+- NEVER use a generic ledger named "Sundry Expenses", "General Expenses", or "Miscellaneous Expenses" as a catch-all. For purchase/POS transactions (e.g. "PURCHASE TRXN. <VENDOR NAME> <LOCATION>"), extract the merchant/vendor name from the narration and use it as PARTYLEDGERNAME — create that vendor as a new ledger (via <LEDGER ACTION="Create">) under PARENT "Sundry Creditors" if not already in the Ledger Master. Only fall back to "Suspense Account" if NO vendor/merchant name can be identified at all.
 
 ═══ NARRATION FORMAT ═══
 Format every narration as: "<description> - <reference> | Ref: <reference> | Date: <DD-Mon-YYYY>"
@@ -934,9 +991,10 @@ Move the bank's original reference number out of VOUCHERNUMBER and into the narr
 If a TALLY LEDGER MASTER is provided, you MUST use the EXACT existing ledger name from that list whenever a transaction matches it — even if wording differs slightly (e.g. "WIO Bank A/C 5690" in the master → use that, not "WIO Bank - 5690"). Match by meaning, not exact string. NEVER create a new ledger if a reasonable match already exists. Only create new ledgers (via <LEDGER ACTION="Create">) for genuinely new counterparties not in the master.
 
 ═══ CONSISTENCY ACROSS CHUNKS — CRITICAL ═══
-- The bank account ledger name MUST be IDENTICAL in every voucher across the entire output. If a Ledger Master is provided, use that exact name. If NOT provided, use the simplest form: just the bank's short name (e.g. "RAK Bank", not "RAK Bank - RAKBANK Current A/c" or "RAK Bank A/C 0373532428001" or "RAKBANK Current Account").
-- The cash ledger MUST always be named exactly "Cash" — never "Cash in Hand", "Cash-in-Hand", or "Cash In Hand".
-- Person/company names used as ledger names MUST use consistent Title Case (e.g. "Salim Mohammed Mazar Ali" — never ALL CAPS) and MUST be assigned to exactly ONE parent group throughout (never both "Sundry Debtors" and "Sundry Creditors" for the same entity in different chunks).
+- The bank account ledger name MUST be IDENTICAL in every voucher across the entire output — pick ONE name and use it everywhere. If a Ledger Master is provided, use that exact name. If NOT provided, use the bank's simplest commonly-recognized short name (e.g. prefer "ABC Bank" over verbose variants like "ABC Bank - Current A/c", "ABC Bank A/C 1234567", or "ABC Bank Current Account" — pick the shortest form and apply it consistently to every voucher).
+- The cash ledger MUST always use ONE consistent name throughout (e.g. always "Cash" — never switch between "Cash", "Cash in Hand", "Cash-in-Hand", and "Cash In Hand" across different vouchers).
+- Person/company names used as ledger names MUST use consistent capitalization throughout (pick one casing — e.g. Title Case — and never switch to ALL CAPS for the same entity) and MUST be assigned to exactly ONE parent group throughout (never assign the same entity to both "Sundry Debtors" and "Sundry Creditors" in different chunks).
+- For the SAME vendor/merchant/counterparty appearing in multiple transactions across the file, use the EXACT SAME ledger name every time — never create one as a named entity in one place and a generic catch-all ledger in another.
 
 ═══ OTHER ═══
 - If USER CLASSIFICATION RULES are provided, follow them strictly — they override all defaults above
