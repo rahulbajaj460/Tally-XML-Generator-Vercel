@@ -797,15 +797,17 @@ async function processChunk(contentParts, sys, password) {
 }
 
 // ── MERGE MULTIPLE XML RESULTS INTO ONE ENVELOPE ──
+// Ledger creations (<LEDGER ACTION="Create">) are deduplicated and placed first,
+// followed by all vouchers, so Tally creates each new ledger only once.
 function mergeXMLResults(xmlParts) {
-  const allVouchers = [];
+  const ledgerBlocks = new Map(); // key: ledger name, value: full TALLYMESSAGE block
+  const voucherBlocks = [];
   let company = '';
 
   for (const xml of xmlParts) {
     if (!xml) continue;
     const clean = xml.replace(/^```(?:xml)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
 
-    // Extract company name from first result
     if (!company) {
       const m = clean.match(/<SVCURRENTCOMPANY>([^<]+)<\/SVCURRENTCOMPANY>/);
       if (m) company = m[1];
@@ -813,12 +815,29 @@ function mergeXMLResults(xmlParts) {
 
     // Extract all TALLYMESSAGE blocks
     const msgs = clean.match(/<TALLYMESSAGE[\s\S]*?<\/TALLYMESSAGE>/g) || [];
-    allVouchers.push(...msgs);
+
+    for (const msg of msgs) {
+      const ledgerMatch = msg.match(/<LEDGER\s+NAME="([^"]+)"\s+ACTION="Create">/);
+      if (ledgerMatch) {
+        // Ledger creation block — dedupe by ledger name
+        const name = ledgerMatch[1];
+        if (!ledgerBlocks.has(name)) ledgerBlocks.set(name, msg);
+      } else if (msg.includes('<VOUCHER')) {
+        voucherBlocks.push(msg);
+      }
+    }
   }
 
-  if (allVouchers.length === 0) return xmlParts[0] || '';
+  if (ledgerBlocks.size === 0 && voucherBlocks.length === 0) return xmlParts[0] || '';
 
-  // Wrap in single ENVELOPE
+  // Renumber vouchers sequentially across all chunks
+  let seq = 1;
+  const renumbered = voucherBlocks.map(v =>
+    v.replace(/<VOUCHERNUMBER>[^<]*<\/VOUCHERNUMBER>/, `<VOUCHERNUMBER>${seq++}</VOUCHERNUMBER>`)
+  );
+
+  const allBlocks = [...ledgerBlocks.values(), ...renumbered];
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <ENVELOPE>
 <HEADER>
@@ -827,13 +846,13 @@ function mergeXMLResults(xmlParts) {
 <BODY>
 <IMPORTDATA>
 <REQUESTDESC>
-<REPORTNAME>Vouchers</REPORTNAME>
+<REPORTNAME>All Masters</REPORTNAME>
 <STATICVARIABLES>
 <SVCURRENTCOMPANY>${company}</SVCURRENTCOMPANY>
 </STATICVARIABLES>
 </REQUESTDESC>
 <REQUESTDATA>
-${allVouchers.join('\n')}
+${allBlocks.join('\n')}
 </REQUESTDATA>
 </IMPORTDATA>
 </BODY>
@@ -842,21 +861,48 @@ ${allVouchers.join('\n')}
 
 // ── TALLY XML INSTRUCTIONS — UNCHANGED ──
 const INSTR = {
-  bank: `You are a Tally ERP 9 / Tally Prime XML expert for UAE accounting.
-Parse the bank statement and generate valid Tally XML import format.
-Rules:
-- Credit entries (money coming IN) → Receipt Vouchers
-- Debit entries (money going OUT) → Payment Vouchers
-- Bank transfers between own accounts → Contra Vouchers
-- VAT payments → Payment Voucher with ledger "VAT Payable"
-- Salary payments → Payment Voucher with ledger "Salaries & Wages"
-- Bank charges → Payment Voucher with ledger "Bank Charges"
-- Rent → Payment Voucher with ledger "Rent Expense"
-- Professional fees received → Receipt with "Professional Fees Income" or "Consulting Fees"
-- CRITICAL — LEDGER MATCHING: If a TALLY LEDGER MASTER is provided, you MUST use the EXACT existing ledger name from that list whenever a transaction matches it — even if the wording differs slightly (e.g. "WIO Bank A/C 5690" in the master should be used instead of creating "WIO Bank - 5690"). Match by meaning, not just exact string. NEVER create a new ledger name if a reasonably matching one already exists in the master. Only create a new ledger name if NO existing ledger reasonably fits.
-- If USER CLASSIFICATION RULES are provided in the user message, follow them strictly — they override all defaults above
-- Date format: YYYYMMDD (no slashes)
+  bank: `You are a Tally ERP 9 / Tally Prime XML expert for UAE accounting. Generate a complete, importable Tally XML for the bank statement provided.
+
+═══ STRUCTURE REQUIREMENTS ═══
+1. Root: <ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>All Masters</REPORTNAME>... <REQUESTDATA>
+2. If you identify a counterparty (a named person/company that is not already a standard ledger) that needs a new ledger — e.g. a loan party, a new supplier, a new customer — output a <LEDGER ACTION="Create"> TALLYMESSAGE block FIRST, before any vouchers reference it. Use:
+   <LEDGER NAME="..." ACTION="Create"><PARENT>...</PARENT><ISBILLWISEON>No</ISBILLWISEON><OPENINGBALANCE>0</OPENINGBALANCE></LEDGER>
+   Choose PARENT based on context: loans received from individuals → "Unsecured Loans"; new suppliers → "Sundry Creditors"; new customers → "Sundry Debtors"; new expense types → "Indirect Expenses".
+3. Each VOUCHER must include: REMOTEID="" VCHKEY="" attributes, <DATE>, <EFFECTIVEDATE> (same as DATE unless stated otherwise), <VOUCHERTYPENAME>, <VOUCHERNUMBER> (sequential: 1, 2, 3...), <PARTYLEDGERNAME> (the non-bank ledger in the transaction), <NARRATION>.
+4. Ledger entries use tag <ALLLEDGERENTRIES.LIST> (not <LEDGERENTRIES.LIST>).
+
+═══ SIGN CONVENTION — CRITICAL, GET THIS EXACTLY RIGHT ═══
+- RECEIPT (money IN to bank): Bank ledger ISDEEMEDPOSITIVE=Yes, Amount POSITIVE. Other-side ledger ISDEEMEDPOSITIVE=No, Amount NEGATIVE.
+- PAYMENT (money OUT of bank): Bank ledger ISDEEMEDPOSITIVE=No, Amount NEGATIVE. Other-side (expense/party) ledger ISDEEMEDPOSITIVE=Yes, Amount POSITIVE.
+- CONTRA (bank↔cash or bank↔bank transfer): Destination account ISDEEMEDPOSITIVE=Yes, Amount POSITIVE. Source account ISDEEMEDPOSITIVE=No, Amount NEGATIVE.
+- Every voucher's two entries must have EXACTLY opposite Amount values (e.g. +1000 and -1000) and opposite ISDEEMEDPOSITIVE flags. Never violate this — it must always balance to zero.
+
+═══ VOUCHER TYPE RULES ═══
+- Credit entries (money IN) → Receipt Vouchers
+- Debit entries (money OUT) → Payment Vouchers
+- Transfers between the company's own bank/cash accounts → Contra Vouchers
+- VAT payments → "VAT Payable"
+- Salary payments → "Salaries & Wages"
+- Bank/forex charges → "Bank Charges" (PARENT: Indirect Expenses)
+- Rent → "Rent Expense"
+- Professional fees received → "Professional Fees Income" or "Consulting Fees"
+- Loan received from a named individual/entity → create that person/entity as a ledger under "Unsecured Loans" and use as PARTYLEDGERNAME — do NOT dump to Suspense Account if a name is identifiable
+- Only use "Suspense Account" when the transaction description gives genuinely no identifiable counterparty
+
+═══ NARRATION FORMAT ═══
+Format every narration as: "<description> - <reference> | Ref: <reference> | Date: <DD-Mon-YYYY>"
+Example: "AANI FROM SALIM MOHAMMED MAZAR ALI - M70773 | Ref: M70773 | Date: 12-Apr-2025"
+Move the bank's original reference number out of VOUCHERNUMBER and into the narration as shown. VOUCHERNUMBER itself should be sequential (1, 2, 3...) across the whole output.
+
+═══ LEDGER MATCHING ═══
+If a TALLY LEDGER MASTER is provided, you MUST use the EXACT existing ledger name from that list whenever a transaction matches it — even if wording differs slightly (e.g. "WIO Bank A/C 5690" in the master → use that, not "WIO Bank - 5690"). Match by meaning, not exact string. NEVER create a new ledger if a reasonable match already exists. Only create new ledgers (via <LEDGER ACTION="Create">) for genuinely new counterparties not in the master.
+
+═══ OTHER ═══
+- If USER CLASSIFICATION RULES are provided, follow them strictly — they override all defaults above
+- Date format: YYYYMMDD (no slashes) for <DATE> and <EFFECTIVEDATE>
 - Company name exactly as provided
+- GUID: omit entirely (Tally auto-generates on import) — do not invent GUID values
+
 Output ONLY valid Tally XML starting with <?xml or <ENVELOPE. No markdown, no explanation.`,
 
   sales: `You are a Tally ERP 9 / Tally Prime XML expert for UAE accounting.
