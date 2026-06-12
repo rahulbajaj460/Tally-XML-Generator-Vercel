@@ -802,10 +802,10 @@ async function processChunk(contentParts, sys, password) {
 // ── MERGE MULTIPLE XML RESULTS INTO ONE ENVELOPE ──
 // Ledger creations (<LEDGER ACTION="Create">) are deduplicated and placed first,
 // followed by all vouchers, so Tally creates each new ledger only once.
-function mergeXMLResults(xmlParts) {
+function mergeXMLResults(xmlParts, companyName) {
   const ledgerBlocks = new Map(); // key: ledger name, value: full TALLYMESSAGE block
   const voucherBlocks = [];
-  let company = '';
+  let company = companyName || '';
 
   for (const xml of xmlParts) {
     if (!xml) continue;
@@ -841,6 +841,38 @@ function mergeXMLResults(xmlParts) {
 
   const allBlocks = [...ledgerBlocks.values(), ...renumbered];
 
+  // Normalize known ledger name variants across all blocks for consistency
+  const NORMALIZE_MAP = {
+    'RAK Bank Current Account': 'RAK Bank',
+    'RAK Bank A/C 0373532428001': 'RAK Bank',
+    'RAK Bank - RAKBANK Current A/c': 'RAK Bank',
+    'RAKBANK Current A/c': 'RAK Bank',
+    'RAKBANK Current Account': 'RAK Bank',
+    'Cash in Hand': 'Cash',
+    'Cash In Hand': 'Cash',
+    'Cash-in-Hand': 'Cash',
+    'SALIM MOHAMMED MAZAR ALI': 'Salim Mohammed Mazar Ali'
+  };
+  let merged = allBlocks.join('\n');
+  for (const [variant, canonical] of Object.entries(NORMALIZE_MAP)) {
+    if (variant === canonical) continue;
+    merged = merged.split(`>${variant}<`).join(`>${canonical}<`)
+                    .split(`"${variant}"`).join(`"${canonical}"`);
+  }
+
+  // Re-dedupe ledger creation blocks after normalization (keep first occurrence only)
+  const seenLedgers = new Set();
+  merged = merged.replace(/<TALLYMESSAGE[^>]*>\s*<LEDGER NAME="([^"]+)"[\s\S]*?<\/TALLYMESSAGE>\s*/g, (block, name) => {
+    if (seenLedgers.has(name)) return '';
+    seenLedgers.add(name);
+    return block;
+  });
+
+  // Normalize VCHTYPE / VOUCHERTYPENAME — strip trailing " Voucher" if present
+  merged = merged
+    .replace(/VCHTYPE="(Payment|Receipt|Contra) Voucher"/g, 'VCHTYPE="$1"')
+    .replace(/<VOUCHERTYPENAME>(Payment|Receipt|Contra) Voucher<\/VOUCHERTYPENAME>/g, '<VOUCHERTYPENAME>$1</VOUCHERTYPENAME>');
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <ENVELOPE>
 <HEADER>
@@ -855,7 +887,7 @@ function mergeXMLResults(xmlParts) {
 </STATICVARIABLES>
 </REQUESTDESC>
 <REQUESTDATA>
-${allBlocks.join('\n')}
+${merged}
 </REQUESTDATA>
 </IMPORTDATA>
 </BODY>
@@ -881,9 +913,10 @@ const INSTR = {
 - Every voucher's two entries must have EXACTLY opposite Amount values (e.g. +1000 and -1000) and opposite ISDEEMEDPOSITIVE flags. Never violate this — it must always balance to zero.
 
 ═══ VOUCHER TYPE RULES ═══
-- Credit entries (money IN) → Receipt Vouchers
-- Debit entries (money OUT) → Payment Vouchers
-- Transfers between the company's own bank/cash accounts → Contra Vouchers
+- Credit entries (money IN) → VCHTYPE="Receipt" and VOUCHERTYPENAME="Receipt"
+- Debit entries (money OUT) → VCHTYPE="Payment" and VOUCHERTYPENAME="Payment"
+- Transfers between the company's own bank/cash accounts → VCHTYPE="Contra" and VOUCHERTYPENAME="Contra"
+- CRITICAL: VCHTYPE and VOUCHERTYPENAME must be EXACTLY one of "Payment", "Receipt", "Contra" — NEVER append the word "Voucher" (e.g. "Payment Voucher" is WRONG; use "Payment")
 - VAT payments → "VAT Payable"
 - Salary payments → "Salaries & Wages"
 - Bank/forex charges → "Bank Charges" (PARENT: Indirect Expenses)
@@ -899,6 +932,11 @@ Move the bank's original reference number out of VOUCHERNUMBER and into the narr
 
 ═══ LEDGER MATCHING ═══
 If a TALLY LEDGER MASTER is provided, you MUST use the EXACT existing ledger name from that list whenever a transaction matches it — even if wording differs slightly (e.g. "WIO Bank A/C 5690" in the master → use that, not "WIO Bank - 5690"). Match by meaning, not exact string. NEVER create a new ledger if a reasonable match already exists. Only create new ledgers (via <LEDGER ACTION="Create">) for genuinely new counterparties not in the master.
+
+═══ CONSISTENCY ACROSS CHUNKS — CRITICAL ═══
+- The bank account ledger name MUST be IDENTICAL in every voucher across the entire output. If a Ledger Master is provided, use that exact name. If NOT provided, use the simplest form: just the bank's short name (e.g. "RAK Bank", not "RAK Bank - RAKBANK Current A/c" or "RAK Bank A/C 0373532428001" or "RAKBANK Current Account").
+- The cash ledger MUST always be named exactly "Cash" — never "Cash in Hand", "Cash-in-Hand", or "Cash In Hand".
+- Person/company names used as ledger names MUST use consistent Title Case (e.g. "Salim Mohammed Mazar Ali" — never ALL CAPS) and MUST be assigned to exactly ONE parent group throughout (never both "Sundry Debtors" and "Sundry Creditors" for the same entity in different chunks).
 
 ═══ OTHER ═══
 - If USER CLASSIFICATION RULES are provided, follow them strictly — they override all defaults above
@@ -1092,10 +1130,15 @@ async function generate() {
 
     // ── MERGE CHUNKS ──
     document.getElementById('loaderText').textContent = 'Merging results…';
-    let xml = totalChunks > 1 ? mergeXMLResults(xmlParts) : xmlParts[0];
+    let xml = totalChunks > 1 ? mergeXMLResults(xmlParts, company) : xmlParts[0];
     xml = (xml || '').replace(/^```(?:xml)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
 
     xml = xml.replace(/^```(?:xml)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
+
+    // Normalize VCHTYPE / VOUCHERTYPENAME — strip stray " Voucher" suffix (also applies to single-chunk output)
+    xml = xml
+      .replace(/VCHTYPE="(Payment|Receipt|Contra) Voucher"/g, 'VCHTYPE="$1"')
+      .replace(/<VOUCHERTYPENAME>(Payment|Receipt|Contra) Voucher<\/VOUCHERTYPENAME>/g, '<VOUCHERTYPENAME>$1</VOUCHERTYPENAME>');
 
     console.log('=== TALLY XML PREVIEW (first 600 chars) ===');
     console.log(xml.slice(0, 600));
