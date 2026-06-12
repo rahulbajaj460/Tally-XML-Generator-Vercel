@@ -853,7 +853,7 @@ Rules:
 - Bank charges → Payment Voucher with ledger "Bank Charges"
 - Rent → Payment Voucher with ledger "Rent Expense"
 - Professional fees received → Receipt with "Professional Fees Income" or "Consulting Fees"
-- If ledger master provided, match to exact ledger names from it
+- CRITICAL — LEDGER MATCHING: If a TALLY LEDGER MASTER is provided, you MUST use the EXACT existing ledger name from that list whenever a transaction matches it — even if the wording differs slightly (e.g. "WIO Bank A/C 5690" in the master should be used instead of creating "WIO Bank - 5690"). Match by meaning, not just exact string. NEVER create a new ledger name if a reasonably matching one already exists in the master. Only create a new ledger name if NO existing ledger reasonably fits.
 - If USER CLASSIFICATION RULES are provided in the user message, follow them strictly — they override all defaults above
 - Date format: YYYYMMDD (no slashes)
 - Company name exactly as provided
@@ -866,7 +866,8 @@ Rules:
 - Debit: Party/Customer ledger for invoice total
 - Credit: Sales ledger for base amount
 - If VAT 5% detected or requested: Credit "Output VAT 5%" ledger separately
-- Use party name from invoice as ledger name
+- CRITICAL — LEDGER MATCHING: If a TALLY LEDGER MASTER is provided, use the EXACT existing ledger name from it whenever it reasonably matches the party — match by meaning, not exact string. Only create a new ledger if nothing in the master fits.
+- Use party name from invoice as ledger name (if no master match found)
 - If USER CLASSIFICATION RULES are provided in the user message, follow them strictly — they override all defaults above
 - Date format: YYYYMMDD
 - Company name exactly as provided
@@ -879,7 +880,8 @@ Rules:
 - Credit: Party/Supplier ledger for invoice total
 - Debit: Purchase/Expense ledger for base amount
 - If VAT 5% detected or requested: Debit "Input VAT 5%" ledger separately
-- Use supplier name from invoice as ledger name
+- CRITICAL — LEDGER MATCHING: If a TALLY LEDGER MASTER is provided, use the EXACT existing ledger name from it whenever it reasonably matches the supplier — match by meaning, not exact string. Only create a new ledger if nothing in the master fits.
+- Use supplier name from invoice as ledger name (if no master match found)
 - If USER CLASSIFICATION RULES are provided in the user message, follow them strictly — they override all defaults above
 - Date format: YYYYMMDD
 - Company name exactly as provided
@@ -926,7 +928,7 @@ async function generate() {
     let ledgerCtx = '';
     if (S.ledgerFile && !isPDF(S.ledgerFile)) {
       const lt = await excelToText(S.ledgerFile);
-      if (lt.trim()) ledgerCtx = `\nLedger Master:\n${lt.slice(0, 3000)}`;
+      if (lt.trim()) ledgerCtx = `\n\n=== TALLY LEDGER MASTER (existing ledgers in this company) ===\n${lt.slice(0, 12000)}\n=== END LEDGER MASTER ===`;
     }
 
     // Build instruction text
@@ -998,7 +1000,7 @@ async function generate() {
       if (ci === 0 && S.ledgerFile && isPDF(S.ledgerFile)) {
         const lb64 = await toBase64(S.ledgerFile);
         chunkParts.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: lb64 } });
-        chunkParts.push({ type: 'text', text: 'Above is the Tally Ledger Master. Use exact ledger names from it.' });
+        chunkParts.push({ type: 'text', text: 'Above is the TALLY LEDGER MASTER for this company — it lists ALL existing ledger accounts. You MUST match transactions to these EXACT existing ledger names whenever a reasonable match exists (match by meaning, not exact spelling). Do NOT create new/duplicate ledgers if one already exists for that purpose.' });
       }
 
       if (chunk.type === 'pdf_b64') {
