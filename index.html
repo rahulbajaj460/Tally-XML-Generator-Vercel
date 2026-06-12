@@ -731,7 +731,7 @@ async function splitPDFIntoChunks(file) {
   if (pages.length === 0) throw new Error(`No text found in ${file.name}. The PDF may be image-based (scanned). Please export as CSV from your bank.`);
 
   // Group pages into chunks of ~40 pages each (typical bank statement)
-  const PAGES_PER_CHUNK = 40;
+  const PAGES_PER_CHUNK = 15; // smaller chunks = output stays well under token limit per chunk
   const chunks = [];
   for (let i = 0; i < pages.length; i += PAGES_PER_CHUNK) {
     const slice = pages.slice(i, i + PAGES_PER_CHUNK);
@@ -752,7 +752,7 @@ async function processChunk(contentParts, sys, password) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       password,
-      max_tokens: 8000,
+      max_tokens: 16000,
       system: sys,
       messages: [{ role: 'user', content: contentParts }]
     })
@@ -999,7 +999,7 @@ async function generate() {
         const txt = await excelToText(f);
         if (!txt.trim()) throw new Error(`Could not read ${f.name}. Try saving as CSV first.`);
         const lines = txt.split('\n');
-        const LINES_PER_CHUNK = 800;
+        const LINES_PER_CHUNK = 300; // smaller chunks = output stays well under token limit per chunk
         if (lines.length <= LINES_PER_CHUNK) {
           fileChunks = [{ type: 'text', data: txt.slice(0, 14000), label: f.name }];
         } else {
@@ -1063,7 +1063,19 @@ async function generate() {
       }
 
       const chunkXML = await processChunk(chunkParts, sys, S.password);
-      if (chunkXML) xmlParts.push(chunkXML);
+      if (chunkXML) {
+        // Detect truncation: well-formed XML should end with a closing tag
+        const trimmed = chunkXML.trim();
+        const looksTruncated = !trimmed.endsWith('</TALLYMESSAGE>') &&
+                                !trimmed.endsWith('</ENVELOPE>') &&
+                                !trimmed.endsWith('```');
+        if (looksTruncated) {
+          console.warn(`⚠️ Chunk ${ci+1} output may be truncated (hit token limit). Last 100 chars:`, trimmed.slice(-100));
+          const cur = document.getElementById('cs_'+ci);
+          if (cur) cur.title += ' ⚠️ possibly truncated — reduce chunk size if vouchers are missing';
+        }
+        xmlParts.push(chunkXML);
+      }
 
       if (ci === totalChunks - 1) {
         document.getElementById('chunkFill').style.width = '100%';
