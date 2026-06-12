@@ -731,7 +731,7 @@ async function splitPDFIntoChunks(file) {
   if (pages.length === 0) throw new Error(`No text found in ${file.name}. The PDF may be image-based (scanned). Please export as CSV from your bank.`);
 
   // Group pages into chunks of ~40 pages each (typical bank statement)
-  const PAGES_PER_CHUNK = 4; // smaller chunks = output stays well under token limit per chunk
+  const PAGES_PER_CHUNK = 2; // smaller chunks = output stays well under token limit per chunk
   const chunks = [];
   for (let i = 0; i < pages.length; i += PAGES_PER_CHUNK) {
     const slice = pages.slice(i, i + PAGES_PER_CHUNK);
@@ -1064,13 +1064,15 @@ async function generate() {
 
       const chunkXML = await processChunk(chunkParts, sys, S.password);
       if (chunkXML) {
-        // Detect truncation: well-formed XML should end with a closing tag
         const trimmed = chunkXML.trim();
         const looksTruncated = !trimmed.endsWith('</TALLYMESSAGE>') &&
                                 !trimmed.endsWith('</ENVELOPE>') &&
                                 !trimmed.endsWith('```');
+        // Count vouchers in this chunk for debugging
+        const chunkVoucherCount = (trimmed.match(/<VOUCHER /g) || []).length;
+        console.log(`Chunk ${ci+1}/${totalChunks} [${chunk.label}]: ${chunkVoucherCount} vouchers, ${trimmed.length} chars, truncated=${looksTruncated}`);
         if (looksTruncated) {
-          console.warn(`⚠️ Chunk ${ci+1} output may be truncated (hit token limit). Last 100 chars:`, trimmed.slice(-100));
+          console.warn(`⚠️ Chunk ${ci+1} TRUNCATED. Last 150 chars:`, trimmed.slice(-150));
           const cur = document.getElementById('cs_'+ci);
           if (cur) cur.title += ' ⚠️ possibly truncated — reduce chunk size if vouchers are missing';
         }
