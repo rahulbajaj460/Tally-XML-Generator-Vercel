@@ -32,7 +32,7 @@ export default async function handler(req) {
 
     const { password, ...anthropicPayload } = body;
     anthropicPayload.model = 'claude-sonnet-4-5';
-    anthropicPayload.max_tokens = anthropicPayload.max_tokens || 8000;
+    anthropicPayload.max_tokens = anthropicPayload.max_tokens || 32000;
     anthropicPayload.stream = true;
 
     const anthropicResp = await fetch('https://api.anthropic.com/v1/messages', {
