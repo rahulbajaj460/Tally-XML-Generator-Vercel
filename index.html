@@ -907,6 +907,30 @@ function autoCreateMissingLedgerMasters(merged, knownLedgerNames) {
   return merged;
 }
 
+// ── FLIP LEDGER ENTRY SIGNS ──
+// Normalizes the debit/credit sign convention for ALL voucher types
+// (Payment, Receipt, Contra) to match the reference convention:
+// for every <ALLLEDGERENTRIES.LIST>/<LEDGERENTRIES.LIST> block inside a
+// voucher, negate <AMOUNT> and flip <ISDEEMEDPOSITIVE> Yes<->No. This is
+// a pure sign inversion (does not change which ledger appears where), so
+// it's safe regardless of which convention the model originally used —
+// applying it twice would cancel out, so it must be applied exactly once.
+function flipLedgerEntrySigns(xml) {
+  return xml.replace(/<VOUCHER\b[^>]*>[\s\S]*?<\/VOUCHER>/g, voucherBlock => {
+    return voucherBlock.replace(/<(ALL)?LEDGERENTRIES\.LIST>([\s\S]*?)<\/(ALL)?LEDGERENTRIES\.LIST>/g, (entryBlock, allPrefix, inner, allPrefix2) => {
+      let updated = inner
+        .replace(/<AMOUNT>(-?)([\d.]+)<\/AMOUNT>/, (m, sign, num) => {
+          const flipped = sign === '-' ? '' : '-';
+          return `<AMOUNT>${flipped}${num}</AMOUNT>`;
+        })
+        .replace(/<ISDEEMEDPOSITIVE>(Yes|No)<\/ISDEEMEDPOSITIVE>/, (m, val) => {
+          return `<ISDEEMEDPOSITIVE>${val === 'Yes' ? 'No' : 'Yes'}</ISDEEMEDPOSITIVE>`;
+        });
+      return `<${allPrefix || ''}LEDGERENTRIES.LIST>${updated}</${allPrefix2 || ''}LEDGERENTRIES.LIST>`;
+    });
+  });
+}
+
 // ── MERGE MULTIPLE XML RESULTS INTO ONE ENVELOPE ──
 // Ledger creations (<LEDGER ACTION="Create">) are deduplicated and placed first,
 // followed by all vouchers, so Tally creates each new ledger only once.
@@ -1145,6 +1169,10 @@ function mergeXMLResults(xmlParts, companyName, knownLedgerNames) {
   merged = merged
     .replace(/VCHTYPE="(Payment|Receipt|Contra) Voucher"/g, 'VCHTYPE="$1"')
     .replace(/<VOUCHERTYPENAME>(Payment|Receipt|Contra) Voucher<\/VOUCHERTYPENAME>/g, '<VOUCHERTYPENAME>$1</VOUCHERTYPENAME>');
+
+  // Normalize debit/credit sign convention to match the reference convention
+  // (see flipLedgerEntrySigns for details)
+  merged = flipLedgerEntrySigns(merged);
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <ENVELOPE>
@@ -1441,6 +1469,9 @@ async function generate() {
     // Safety net: auto-create masters for any ledger referenced but not created
     // and not already in the uploaded Ledger Master (prevents "Referenced master is missing")
     xml = autoCreateMissingLedgerMasters(xml, knownLedgerNames);
+
+    // Normalize debit/credit sign convention to match the reference convention
+    xml = flipLedgerEntrySigns(xml);
 
     console.log('=== TALLY XML PREVIEW (first 600 chars) ===');
     console.log(xml.slice(0, 600));
