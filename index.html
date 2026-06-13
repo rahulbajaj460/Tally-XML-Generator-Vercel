@@ -1476,8 +1476,13 @@ async function generate() {
     // and not already in the uploaded Ledger Master (prevents "Referenced master is missing")
     xml = autoCreateMissingLedgerMasters(xml, knownLedgerNames);
 
-    // Normalize debit/credit sign convention to match the reference convention
-    xml = flipLedgerEntrySigns(xml);
+    // Normalize debit/credit sign convention to match the reference convention.
+    // NOTE: for multi-chunk output, mergeXMLResults() already applies this flip
+    // internally — applying it again here would cancel it out (flip is self-inverse).
+    // Only apply here for the single-chunk path.
+    if (totalChunks <= 1) {
+      xml = flipLedgerEntrySigns(xml);
+    }
 
     console.log('=== TALLY XML PREVIEW (first 600 chars) ===');
     console.log(xml.slice(0, 600));
