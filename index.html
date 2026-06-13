@@ -906,12 +906,102 @@ function mergeXMLResults(xmlParts, companyName) {
       }
     }
 
-    // 5. Apply replacements (longest variant strings first to avoid partial-overlap issues)
+    // 5. Apply Stage-1 replacements (longest variant strings first to avoid partial-overlap issues)
     const sortedVariants = Object.keys(VARIANT_MAP).sort((a, b) => b.length - a.length);
     for (const variant of sortedVariants) {
       const canonical = VARIANT_MAP[variant];
       merged = merged.split(`>${variant}<`).join(`>${canonical}<`)
                       .split(`"${variant}"`).join(`"${canonical}"`);
+    }
+
+    // ── STAGE 2: FUZZY NAME MATCHING ──
+    // Catches variants Stage 1 can't (different abbreviations of the same
+    // business name, e.g. "Nawaes Almadina Sprmkt" vs "Nawaes Al Madina SMT").
+    // Works by stripping common generic business-type words (supermarket,
+    // restaurant, cafe, llc, etc. — and their common abbreviations) from each
+    // name, then comparing the remaining "core business name" via edit-distance
+    // similarity. Two names are merged only if their core business names are
+    // near-identical (>= 0.85 similarity) AND that core is non-trivial (>= 4 chars),
+    // to avoid accidentally merging unrelated short/generic names.
+    {
+      const levenshtein = (a, b) => {
+        const m = a.length, n = b.length;
+        if (m === 0) return n;
+        if (n === 0) return m;
+        const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+        for (let i = 0; i <= m; i++) dp[i][0] = i;
+        for (let j = 0; j <= n; j++) dp[0][j] = j;
+        for (let i = 1; i <= m; i++) {
+          for (let j = 1; j <= n; j++) {
+            dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1]
+                                          : 1 + Math.min(dp[i-1][j-1], dp[i-1][j], dp[i][j-1]);
+          }
+        }
+        return dp[m][n];
+      };
+      const simRatio = (a, b) => {
+        const maxLen = Math.max(a.length, b.length);
+        return maxLen === 0 ? 1 : 1 - levenshtein(a, b) / maxLen;
+      };
+      // Generic business-type tokens and their common abbreviations — stripped
+      // before comparison so e.g. "Sprmkt"/"SMT"/"Supermarket" all reduce away.
+      const GENERIC_TOKENS = new Set([
+        'llc', 'll', 'l', 'lc', 'co', 'company', 'fzc', 'fze', 'fzco', 'plc', 'ltd',
+        'trading', 'general', 'est', 'establishment',
+        'supermarket', 'supermkt', 'sprmkt', 'smt', 'mkt', 'market',
+        'restaurant', 'restaura', 'rest', 'resto',
+        'cafe', 'cafte', 'cafeteria', 'caf',
+        'hotel', 'group', 'enterprises', 'enterprise',
+        'the', 'and', 'of'
+      ]);
+      const fusedCore = name => {
+        const t = name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
+          .filter(tok => !GENERIC_TOKENS.has(tok));
+        return t.join('');
+      };
+
+      // Re-collect current (post-Stage-1) ledger names
+      const currentNames = new Set();
+      const re2 = /<LEDGERNAME>([^<]+)<\/LEDGERNAME>|<LEDGER NAME="([^"]+)"/g;
+      let mm;
+      while ((mm = re2.exec(merged)) !== null) currentNames.add(mm[1] || mm[2]);
+
+      // Build fused-core map, group names whose fused cores are near-identical
+      const arr = [...currentNames];
+      const fused = arr.map(fusedCore);
+      const used = new Array(arr.length).fill(false);
+      const FUZZY_MAP = {};
+      for (let i = 0; i < arr.length; i++) {
+        if (used[i] || fused[i].length < 4) continue;
+        const groupIdx = [i];
+        for (let j = i + 1; j < arr.length; j++) {
+          if (used[j] || fused[j].length < 4) continue;
+          if (simRatio(fused[i], fused[j]) >= 0.85) groupIdx.push(j);
+        }
+        if (groupIdx.length > 1) {
+          // pick canonical: prefer non-ALLCAPS, then shortest original name
+          let canonical = arr[groupIdx[0]];
+          for (const gi of groupIdx.slice(1)) {
+            const n = arr[gi];
+            const canIsAllCaps = canonical === canonical.toUpperCase() && /[A-Z]/.test(canonical);
+            const nIsAllCaps = n === n.toUpperCase() && /[A-Z]/.test(n);
+            if (canIsAllCaps && !nIsAllCaps) canonical = n;
+            else if (!canIsAllCaps && !nIsAllCaps && n.length < canonical.length) canonical = n;
+            else if (canIsAllCaps && nIsAllCaps && n.length < canonical.length) canonical = n;
+          }
+          for (const gi of groupIdx) {
+            used[gi] = true;
+            if (arr[gi] !== canonical) FUZZY_MAP[arr[gi]] = canonical;
+          }
+        }
+      }
+
+      const sortedFuzzy = Object.keys(FUZZY_MAP).sort((a, b) => b.length - a.length);
+      for (const variant of sortedFuzzy) {
+        const canonical = FUZZY_MAP[variant];
+        merged = merged.split(`>${variant}<`).join(`>${canonical}<`)
+                        .split(`"${variant}"`).join(`"${canonical}"`);
+      }
     }
   }
 
