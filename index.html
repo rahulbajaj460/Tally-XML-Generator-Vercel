@@ -874,10 +874,16 @@ function autoCreateMissingLedgerMasters(merged, knownLedgerNames) {
     let m;
     while ((m = re.exec(merged)) !== null) referencedNames.add(m[1] || m[2]);
   }
-  // Detect the bank ledger name (first LEDGERNAME containing "bank")
+  // Detect the bank ledger name. Must contain "bank" AND not itself be a
+  // standard P&L ledger (e.g. "Bank Charges" contains "bank" but is an
+  // expense account, not the bank account ledger — exclude it explicitly).
   let bankName = null;
   for (const n of referencedNames) {
-    if (n.toLowerCase().includes('bank')) { bankName = n; break; }
+    const lower = n.toLowerCase();
+    if (lower.includes('bank') && !STANDARD_LEDGERS.has(lower) && !lower.includes('charge')) {
+      bankName = n;
+      break;
+    }
   }
 
   const missing = [];
