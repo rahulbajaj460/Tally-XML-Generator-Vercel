@@ -799,13 +799,122 @@ async function processChunk(contentParts, sys, password) {
   return xml;
 }
 
+// ── AUTO-CREATE MISSING LEDGER MASTERS ──
+// Scans generated XML for any LEDGERNAME/PARTYLEDGERNAME referenced inside
+// vouchers that has no corresponding <LEDGER ACTION="Create"> block in this
+// output AND is not already a known/existing ledger (per the uploaded Ledger
+// Master, if any). For any such name, injects a new <LEDGER ACTION="Create">
+// block (under Sundry Creditors) at the top of the data section, with the
+// required <NAME.LIST><NAME> element. Returns the updated XML string.
+function autoCreateMissingLedgerMasters(merged, knownLedgerNames) {
+  knownLedgerNames = knownLedgerNames || [];
+
+  const STANDARD_LEDGERS = new Set([
+    'cash', 'bank charges', 'suspense account', 'vat payable', 'vat 5%',
+    'salaries & wages', 'salaries and wages', 'rent expense',
+    'professional fees income', 'consulting fees', 'vat input', 'vat output'
+  ]);
+
+  // Fuzzy "core name" comparator — same approach as the vendor-name
+  // normalization pass: strip generic business-type words/abbreviations and
+  // non-alphanumeric chars, then compare via Levenshtein similarity.
+  const GENERIC_TOKENS = new Set([
+    'llc', 'll', 'l', 'lc', 'co', 'company', 'fzc', 'fze', 'fzco', 'plc', 'ltd',
+    'trading', 'general', 'est', 'establishment',
+    'supermarket', 'supermkt', 'sprmkt', 'smt', 'mkt', 'market',
+    'restaurant', 'restaura', 'rest', 'resto',
+    'cafe', 'cafte', 'cafeteria', 'caf',
+    'hotel', 'group', 'enterprises', 'enterprise',
+    'the', 'and', 'of'
+  ]);
+  const fusedCore = name => name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
+    .filter(tok => !GENERIC_TOKENS.has(tok)).join('');
+  const levenshtein = (a, b) => {
+    const m = a.length, n = b.length;
+    if (m === 0) return n;
+    if (n === 0) return m;
+    const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+    for (let i = 0; i <= m; i++) dp[i][0] = i;
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1]
+                                      : 1 + Math.min(dp[i-1][j-1], dp[i-1][j], dp[i][j-1]);
+      }
+    }
+    return dp[m][n];
+  };
+  const simRatio = (a, b) => {
+    const maxLen = Math.max(a.length, b.length);
+    return maxLen === 0 ? 1 : 1 - levenshtein(a, b) / maxLen;
+  };
+
+  const knownCores = knownLedgerNames.map(fusedCore).filter(c => c.length >= 3);
+  const isInLedgerMaster = name => {
+    const core = fusedCore(name);
+    if (core.length < 3) return false;
+    for (const k of knownCores) {
+      if (k === core) return true;
+      if (k.length >= 4 && core.length >= 4 && simRatio(k, core) >= 0.85) return true;
+    }
+    return false;
+  };
+
+  // Collect names that already have a <LEDGER ACTION="Create"> master
+  const createdMasters = new Set();
+  {
+    const re = /<LEDGER NAME="([^"]+)"[^>]*ACTION="Create"/g;
+    let m;
+    while ((m = re.exec(merged)) !== null) createdMasters.add(m[1]);
+  }
+  // Collect every ledger name referenced inside voucher entries
+  const referencedNames = new Set();
+  {
+    const re = /<LEDGERNAME>([^<]+)<\/LEDGERNAME>|<PARTYLEDGERNAME>([^<]+)<\/PARTYLEDGERNAME>/g;
+    let m;
+    while ((m = re.exec(merged)) !== null) referencedNames.add(m[1] || m[2]);
+  }
+  // Detect the bank ledger name (first LEDGERNAME containing "bank")
+  let bankName = null;
+  for (const n of referencedNames) {
+    if (n.toLowerCase().includes('bank')) { bankName = n; break; }
+  }
+
+  const missing = [];
+  for (const name of referencedNames) {
+    if (createdMasters.has(name)) continue;
+    if (name === bankName) continue;
+    if (STANDARD_LEDGERS.has(name.toLowerCase())) continue;
+    if (isInLedgerMaster(name)) continue; // already exists in the company's Tally ledger master
+    missing.push(name);
+  }
+
+  if (missing.length > 0) {
+    const escapeXml = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const newBlocks = missing.map(name => {
+      const escaped = escapeXml(name);
+      return `<TALLYMESSAGE xmlns:UDF="TallyUDF">\n<LEDGER NAME="${escaped}" ACTION="Create">\n<NAME.LIST><NAME>${escaped}</NAME></NAME.LIST>\n<PARENT>Sundry Creditors</PARENT>\n<ISBILLWISEON>No</ISBILLWISEON>\n<OPENINGBALANCE>0</OPENINGBALANCE>\n</LEDGER>\n</TALLYMESSAGE>`;
+    }).join('\n');
+    if (/<REQUESTDATA>/.test(merged)) {
+      merged = merged.replace(/<REQUESTDATA>/, `<REQUESTDATA>\n${newBlocks}`);
+    } else if (/<DATA>/.test(merged)) {
+      merged = merged.replace(/<DATA>/, `<DATA>\n${newBlocks}`);
+    } else {
+      merged = newBlocks + '\n' + merged;
+    }
+  }
+
+  return merged;
+}
+
 // ── MERGE MULTIPLE XML RESULTS INTO ONE ENVELOPE ──
 // Ledger creations (<LEDGER ACTION="Create">) are deduplicated and placed first,
 // followed by all vouchers, so Tally creates each new ledger only once.
-function mergeXMLResults(xmlParts, companyName) {
+function mergeXMLResults(xmlParts, companyName, knownLedgerNames) {
   const ledgerBlocks = new Map(); // key: ledger name, value: full TALLYMESSAGE block
   const voucherBlocks = [];
   let company = companyName || '';
+  knownLedgerNames = knownLedgerNames || [];
 
   for (const xml of xmlParts) {
     if (!xml) continue;
@@ -1023,6 +1132,15 @@ function mergeXMLResults(xmlParts, companyName) {
     return `<LEDGER NAME="${name}"${attrs}><NAME.LIST><NAME>${escaped}</NAME></NAME.LIST>${inner}</LEDGER>`;
   });
 
+  // Safety net: auto-create masters for any ledger referenced by a voucher
+  // (LEDGERNAME / PARTYLEDGERNAME) that has no <LEDGER ACTION="Create"> block
+  // AND does not already exist in the uploaded Ledger Master. Without this,
+  // Tally throws "Referenced master is missing" for that ledger on every
+  // voucher that uses it. Standard ledgers (bank, cash, tax, suspense, and
+  // common P&L heads) are assumed to already exist and are skipped — only
+  // genuinely new vendor/party names not covered anywhere get auto-created.
+  merged = autoCreateMissingLedgerMasters(merged, knownLedgerNames);
+
   // Normalize VCHTYPE / VOUCHERTYPENAME — strip trailing " Voucher" if present
   merged = merged
     .replace(/VCHTYPE="(Payment|Receipt|Contra) Voucher"/g, 'VCHTYPE="$1"')
@@ -1172,10 +1290,23 @@ async function generate() {
 
     // Ledger master — text only in instrText; PDF handled per-chunk
     let ledgerCtx = '';
+    let knownLedgerNames = [];
     if (S.ledgerFile && !isPDF(S.ledgerFile)) {
       const lt = await excelToText(S.ledgerFile);
-      if (lt.trim()) ledgerCtx = `\n\n=== TALLY LEDGER MASTER (existing ledgers in this company) ===\n${lt.slice(0, 12000)}\n=== END LEDGER MASTER ===`;
+      if (lt.trim()) {
+        ledgerCtx = `\n\n=== TALLY LEDGER MASTER (existing ledgers in this company) ===\n${lt.slice(0, 12000)}\n=== END LEDGER MASTER ===`;
+        // Extract candidate ledger names: take the first non-empty cell/column
+        // of each line (ledger-master exports are typically "Name, Group, ..."
+        // or "Name\tGroup\t..."). Skip obvious header/blank/numeric-only rows.
+        knownLedgerNames = lt.split('\n')
+          .map(line => line.split(/\t|,(?=\s*[A-Za-z])/)[0].trim())
+          .filter(name => name && name.length >= 2 && /[A-Za-z]/.test(name))
+          .filter(name => !/^(name|ledger|account|particulars|ledger\s*name|account\s*name|particulars\s*name)$/i.test(name));
+      }
     }
+    // Note: for PDF ledger masters, names can't be extracted client-side —
+    // knownLedgerNames stays empty and the auto-create safety net relies
+    // solely on this run's own <LEDGER ACTION="Create"> blocks in that case.
 
     // Build instruction text
     const vatNote = vatOn ? ' Apply UAE VAT 5% split where applicable.' : '';
@@ -1289,7 +1420,7 @@ async function generate() {
 
     // ── MERGE CHUNKS ──
     document.getElementById('loaderText').textContent = 'Merging results…';
-    let xml = totalChunks > 1 ? mergeXMLResults(xmlParts, company) : xmlParts[0];
+    let xml = totalChunks > 1 ? mergeXMLResults(xmlParts, company, knownLedgerNames) : xmlParts[0];
     xml = (xml || '').replace(/^```(?:xml)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
 
     xml = xml.replace(/^```(?:xml)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
@@ -1306,6 +1437,10 @@ async function generate() {
       const escaped = name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       return `<LEDGER NAME="${name}"${attrs}><NAME.LIST><NAME>${escaped}</NAME></NAME.LIST>${inner}</LEDGER>`;
     });
+
+    // Safety net: auto-create masters for any ledger referenced but not created
+    // and not already in the uploaded Ledger Master (prevents "Referenced master is missing")
+    xml = autoCreateMissingLedgerMasters(xml, knownLedgerNames);
 
     console.log('=== TALLY XML PREVIEW (first 600 chars) ===');
     console.log(xml.slice(0, 600));
