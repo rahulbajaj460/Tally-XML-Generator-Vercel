@@ -1013,6 +1013,16 @@ function mergeXMLResults(xmlParts, companyName) {
     return block;
   });
 
+  // Safety net: Tally Prime requires <NAME.LIST><NAME>...</NAME></NAME.LIST> inside
+  // every <LEDGER ACTION="Create"> block, or it imports as "MISSING_MASTER_NAME"
+  // and every voucher referencing that ledger fails as "Referenced master is missing".
+  // Inject it if the model omitted it.
+  merged = merged.replace(/<LEDGER NAME="([^"]+)"([^>]*ACTION="Create"[^>]*)>([\s\S]*?)<\/LEDGER>/g, (block, name, attrs, inner) => {
+    if (/<NAME\.LIST>/.test(inner)) return block; // already present
+    const escaped = name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `<LEDGER NAME="${name}"${attrs}><NAME.LIST><NAME>${escaped}</NAME></NAME.LIST>${inner}</LEDGER>`;
+  });
+
   // Normalize VCHTYPE / VOUCHERTYPENAME — strip trailing " Voucher" if present
   merged = merged
     .replace(/VCHTYPE="(Payment|Receipt|Contra) Voucher"/g, 'VCHTYPE="$1"')
@@ -1045,8 +1055,9 @@ const INSTR = {
 
 ═══ STRUCTURE REQUIREMENTS ═══
 1. Root: <ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>All Masters</REPORTNAME>... <REQUESTDATA>
-2. If you identify a counterparty (a named person/company that is not already a standard ledger) that needs a new ledger — e.g. a loan party, a new supplier, a new customer — output a <LEDGER ACTION="Create"> TALLYMESSAGE block FIRST, before any vouchers reference it. Use:
-   <LEDGER NAME="..." ACTION="Create"><PARENT>...</PARENT><ISBILLWISEON>No</ISBILLWISEON><OPENINGBALANCE>0</OPENINGBALANCE></LEDGER>
+2. If you identify a counterparty (a named person/company that is not already a standard ledger) that needs a new ledger — e.g. a loan party, a new supplier, a new customer — output a <LEDGER ACTION="Create"> TALLYMESSAGE block FIRST, before any vouchers reference it. CRITICAL: it MUST include a <NAME.LIST><NAME>...</NAME></NAME.LIST> element with the exact same name as the NAME="" attribute — Tally Prime will not recognize the ledger without it (it will show as "MISSING_MASTER_NAME" and cause import exceptions). Use exactly this structure:
+   <LEDGER NAME="..." ACTION="Create"><NAME.LIST><NAME>...</NAME></NAME.LIST><PARENT>...</PARENT><ISBILLWISEON>No</ISBILLWISEON><OPENINGBALANCE>0</OPENINGBALANCE></LEDGER>
+   (Replace both "..." in NAME="..." and <NAME>...</NAME> with the identical ledger name.)
    Choose PARENT based on context: loans received from individuals → "Unsecured Loans"; new suppliers → "Sundry Creditors"; new customers → "Sundry Debtors"; new expense types → "Indirect Expenses".
 3. Each VOUCHER must include: REMOTEID="" VCHKEY="" attributes, <DATE>, <EFFECTIVEDATE> (same as DATE unless stated otherwise), <VOUCHERTYPENAME>, <VOUCHERNUMBER> (sequential: 1, 2, 3...), <PARTYLEDGERNAME> (the non-bank ledger in the transaction), <NARRATION>.
 4. Ledger entries use tag <ALLLEDGERENTRIES.LIST> (not <LEDGERENTRIES.LIST>).
@@ -1287,6 +1298,14 @@ async function generate() {
     xml = xml
       .replace(/VCHTYPE="(Payment|Receipt|Contra) Voucher"/g, 'VCHTYPE="$1"')
       .replace(/<VOUCHERTYPENAME>(Payment|Receipt|Contra) Voucher<\/VOUCHERTYPENAME>/g, '<VOUCHERTYPENAME>$1</VOUCHERTYPENAME>');
+
+    // Safety net: ensure every <LEDGER ACTION="Create"> has <NAME.LIST><NAME>...</NAME></NAME.LIST>
+    // (Tally Prime requires this or the master imports as "MISSING_MASTER_NAME")
+    xml = xml.replace(/<LEDGER NAME="([^"]+)"([^>]*ACTION="Create"[^>]*)>([\s\S]*?)<\/LEDGER>/g, (block, name, attrs, inner) => {
+      if (/<NAME\.LIST>/.test(inner)) return block;
+      const escaped = name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return `<LEDGER NAME="${name}"${attrs}><NAME.LIST><NAME>${escaped}</NAME></NAME.LIST>${inner}</LEDGER>`;
+    });
 
     console.log('=== TALLY XML PREVIEW (first 600 chars) ===');
     console.log(xml.slice(0, 600));
