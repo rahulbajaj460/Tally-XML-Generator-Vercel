@@ -810,10 +810,12 @@ function autoCreateMissingLedgerMasters(merged, knownLedgerNames) {
   knownLedgerNames = knownLedgerNames || [];
 
   const STANDARD_LEDGERS = new Set([
-    'cash', 'bank charges', 'suspense account', 'vat payable', 'vat 5%',
+    'cash', 'bank charges', 'suspense account',
     'salaries & wages', 'salaries and wages', 'rent expense',
-    'professional fees income', 'consulting fees', 'vat input', 'vat output'
+    'professional fees income', 'consulting fees'
   ]);
+  // VAT/tax ledger names get created under "Duties & Taxes" not "Sundry Creditors"
+  const TAX_LEDGER_PATTERN = /^(vat|gst|cgst|sgst|igst|tax)\b/i;
 
   // Fuzzy "core name" comparator — same approach as the vendor-name
   // normalization pass: strip generic business-type words/abbreviations and
@@ -899,7 +901,8 @@ function autoCreateMissingLedgerMasters(merged, knownLedgerNames) {
     const escapeXml = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const newBlocks = missing.map(name => {
       const escaped = escapeXml(name);
-      return `<TALLYMESSAGE xmlns:UDF="TallyUDF">\n<LEDGER NAME="${escaped}" ACTION="Create">\n<NAME.LIST><NAME>${escaped}</NAME></NAME.LIST>\n<PARENT>Sundry Creditors</PARENT>\n<ISBILLWISEON>No</ISBILLWISEON>\n<OPENINGBALANCE>0</OPENINGBALANCE>\n</LEDGER>\n</TALLYMESSAGE>`;
+      const parent = TAX_LEDGER_PATTERN.test(name) ? 'Duties &amp; Taxes' : 'Sundry Creditors';
+      return `<TALLYMESSAGE xmlns:UDF="TallyUDF">\n<LEDGER NAME="${escaped}" ACTION="Create">\n<NAME.LIST><NAME>${escaped}</NAME></NAME.LIST>\n<PARENT>${parent}</PARENT>\n<ISBILLWISEON>No</ISBILLWISEON>\n<OPENINGBALANCE>0</OPENINGBALANCE>\n</LEDGER>\n</TALLYMESSAGE>`;
     }).join('\n');
     if (/<REQUESTDATA>/.test(merged)) {
       merged = merged.replace(/<REQUESTDATA>/, `<REQUESTDATA>\n${newBlocks}`);
@@ -1231,7 +1234,7 @@ const INSTR = {
 - Bank/forex charges → "Bank Charges" (PARENT: Indirect Expenses)
 - Rent → "Rent Expense"
 - Professional fees received → "Professional Fees Income" or "Consulting Fees"
-- Loan received from a named individual/entity → create that person/entity as a ledger under "Unsecured Loans" and use as PARTYLEDGERNAME — do NOT dump to Suspense Account if a name is identifiable AND the user has not instructed otherwise (see DEFAULT vs USER OVERRIDE note below)
+- Loan received from a named individual/entity → create that person/entity as a ledger under "Unsecured Loans" and use as PARTYLEDGERNAME — do NOT dump to Suspense Account if a name is identifiable AND the user has not instructed otherwise (see DEFAULT vs USER OVERRIDE note below). This applies specifically to "AANI FROM/TO [person name]", "INWARD T/T [person name]", or similar transfers where a person's full name is clearly stated and they appear repeatedly — classify their ledger under "Unsecured Loans", NOT "Sundry Creditors" or "Sundry Debtors".
 - DEFAULT (no relevant user instruction): for purchase/POS transactions (e.g. "PURCHASE TRXN. <VENDOR NAME> <LOCATION>"), extract the merchant/vendor name and create that vendor as a new ledger under "Sundry Creditors" if not already in the Ledger Master, rather than using a generic "Sundry Expenses"/"General Expenses"/"Miscellaneous Expenses" catch-all.
 - USER OVERRIDE — IF the USER CLASSIFICATION RULES say something like "post uncategorised ledgers to Suspense Account" or "everything not in the ledger master goes to Suspense": this means Suspense Account is the INTENDED category for any counterparty NOT already present in the uploaded Ledger Master — do NOT create new per-vendor Sundry Creditors ledgers for individual purchase/POS transactions in that case. Only create a new ledger for a counterparty when the user's rules explicitly call for it (e.g. a named loan party who appears repeatedly with large amounts, per "classify per the ledger master" + context). When this override is active, "uncategorised" means "not in the Ledger Master" — route those straight to "Suspense Account", which already exists in the master, rather than inventing new ledgers.
 
