@@ -799,155 +799,13 @@ async function processChunk(contentParts, sys, password) {
   return xml;
 }
 
-// ── AUTO-CREATE MISSING LEDGER MASTERS ──
-// Scans generated XML for any LEDGERNAME/PARTYLEDGERNAME referenced inside
-// vouchers that has no corresponding <LEDGER ACTION="Create"> block in this
-// output AND is not already a known/existing ledger (per the uploaded Ledger
-// Master, if any). For any such name, injects a new <LEDGER ACTION="Create">
-// block (under Sundry Creditors) at the top of the data section, with the
-// required <NAME.LIST><NAME> element. Returns the updated XML string.
-function autoCreateMissingLedgerMasters(merged, knownLedgerNames) {
-  knownLedgerNames = knownLedgerNames || [];
-
-  const STANDARD_LEDGERS = new Set([
-    'cash', 'bank charges', 'suspense account',
-    'salaries & wages', 'salaries and wages', 'rent expense',
-    'professional fees income', 'consulting fees'
-  ]);
-  // VAT/tax ledger names get created under "Duties & Taxes" not "Sundry Creditors"
-  const TAX_LEDGER_PATTERN = /^(vat|gst|cgst|sgst|igst|tax)\b/i;
-
-  // Fuzzy "core name" comparator — same approach as the vendor-name
-  // normalization pass: strip generic business-type words/abbreviations and
-  // non-alphanumeric chars, then compare via Levenshtein similarity.
-  const GENERIC_TOKENS = new Set([
-    'llc', 'll', 'l', 'lc', 'co', 'company', 'fzc', 'fze', 'fzco', 'plc', 'ltd',
-    'trading', 'general', 'est', 'establishment',
-    'supermarket', 'supermkt', 'sprmkt', 'smt', 'mkt', 'market',
-    'restaurant', 'restaura', 'rest', 'resto',
-    'cafe', 'cafte', 'cafeteria', 'caf',
-    'hotel', 'group', 'enterprises', 'enterprise',
-    'the', 'and', 'of'
-  ]);
-  const fusedCore = name => name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
-    .filter(tok => !GENERIC_TOKENS.has(tok)).join('');
-  const levenshtein = (a, b) => {
-    const m = a.length, n = b.length;
-    if (m === 0) return n;
-    if (n === 0) return m;
-    const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-    for (let i = 0; i <= m; i++) dp[i][0] = i;
-    for (let j = 0; j <= n; j++) dp[0][j] = j;
-    for (let i = 1; i <= m; i++) {
-      for (let j = 1; j <= n; j++) {
-        dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1]
-                                      : 1 + Math.min(dp[i-1][j-1], dp[i-1][j], dp[i][j-1]);
-      }
-    }
-    return dp[m][n];
-  };
-  const simRatio = (a, b) => {
-    const maxLen = Math.max(a.length, b.length);
-    return maxLen === 0 ? 1 : 1 - levenshtein(a, b) / maxLen;
-  };
-
-  const knownCores = knownLedgerNames.map(fusedCore).filter(c => c.length >= 3);
-  const isInLedgerMaster = name => {
-    const core = fusedCore(name);
-    if (core.length < 3) return false;
-    for (const k of knownCores) {
-      if (k === core) return true;
-      if (k.length >= 4 && core.length >= 4 && simRatio(k, core) >= 0.85) return true;
-    }
-    return false;
-  };
-
-  // Collect names that already have a <LEDGER ACTION="Create"> master
-  const createdMasters = new Set();
-  {
-    const re = /<LEDGER NAME="([^"]+)"[^>]*ACTION="Create"/g;
-    let m;
-    while ((m = re.exec(merged)) !== null) createdMasters.add(m[1]);
-  }
-  // Collect every ledger name referenced inside voucher entries
-  const referencedNames = new Set();
-  {
-    const re = /<LEDGERNAME>([^<]+)<\/LEDGERNAME>|<PARTYLEDGERNAME>([^<]+)<\/PARTYLEDGERNAME>/g;
-    let m;
-    while ((m = re.exec(merged)) !== null) referencedNames.add(m[1] || m[2]);
-  }
-  // Detect the bank ledger name. Must contain "bank" AND not itself be a
-  // standard P&L ledger (e.g. "Bank Charges" contains "bank" but is an
-  // expense account, not the bank account ledger — exclude it explicitly).
-  let bankName = null;
-  for (const n of referencedNames) {
-    const lower = n.toLowerCase();
-    if (lower.includes('bank') && !STANDARD_LEDGERS.has(lower) && !lower.includes('charge')) {
-      bankName = n;
-      break;
-    }
-  }
-
-  const missing = [];
-  for (const name of referencedNames) {
-    if (createdMasters.has(name)) continue;
-    if (name === bankName) continue;
-    if (STANDARD_LEDGERS.has(name.toLowerCase())) continue;
-    if (isInLedgerMaster(name)) continue; // already exists in the company's Tally ledger master
-    missing.push(name);
-  }
-
-  if (missing.length > 0) {
-    const escapeXml = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const newBlocks = missing.map(name => {
-      const escaped = escapeXml(name);
-      const parent = TAX_LEDGER_PATTERN.test(name) ? 'Duties &amp; Taxes' : 'Sundry Creditors';
-      return `<TALLYMESSAGE xmlns:UDF="TallyUDF">\n<LEDGER NAME="${escaped}" ACTION="Create">\n<NAME.LIST><NAME>${escaped}</NAME></NAME.LIST>\n<PARENT>${parent}</PARENT>\n<ISBILLWISEON>No</ISBILLWISEON>\n<OPENINGBALANCE>0</OPENINGBALANCE>\n</LEDGER>\n</TALLYMESSAGE>`;
-    }).join('\n');
-    if (/<REQUESTDATA>/.test(merged)) {
-      merged = merged.replace(/<REQUESTDATA>/, `<REQUESTDATA>\n${newBlocks}`);
-    } else if (/<DATA>/.test(merged)) {
-      merged = merged.replace(/<DATA>/, `<DATA>\n${newBlocks}`);
-    } else {
-      merged = newBlocks + '\n' + merged;
-    }
-  }
-
-  return merged;
-}
-
-// ── FLIP LEDGER ENTRY SIGNS ──
-// Normalizes the debit/credit sign convention for ALL voucher types
-// (Payment, Receipt, Contra) to match the reference convention:
-// for every <ALLLEDGERENTRIES.LIST>/<LEDGERENTRIES.LIST> block inside a
-// voucher, negate <AMOUNT> and flip <ISDEEMEDPOSITIVE> Yes<->No. This is
-// a pure sign inversion (does not change which ledger appears where), so
-// it's safe regardless of which convention the model originally used —
-// applying it twice would cancel out, so it must be applied exactly once.
-function flipLedgerEntrySigns(xml) {
-  return xml.replace(/<VOUCHER\b[^>]*>[\s\S]*?<\/VOUCHER>/g, voucherBlock => {
-    return voucherBlock.replace(/<(ALL)?LEDGERENTRIES\.LIST>([\s\S]*?)<\/(ALL)?LEDGERENTRIES\.LIST>/g, (entryBlock, allPrefix, inner, allPrefix2) => {
-      let updated = inner
-        .replace(/<AMOUNT>(-?)([\d.]+)<\/AMOUNT>/, (m, sign, num) => {
-          const flipped = sign === '-' ? '' : '-';
-          return `<AMOUNT>${flipped}${num}</AMOUNT>`;
-        })
-        .replace(/<ISDEEMEDPOSITIVE>(Yes|No)<\/ISDEEMEDPOSITIVE>/, (m, val) => {
-          return `<ISDEEMEDPOSITIVE>${val === 'Yes' ? 'No' : 'Yes'}</ISDEEMEDPOSITIVE>`;
-        });
-      return `<${allPrefix || ''}LEDGERENTRIES.LIST>${updated}</${allPrefix2 || ''}LEDGERENTRIES.LIST>`;
-    });
-  });
-}
-
 // ── MERGE MULTIPLE XML RESULTS INTO ONE ENVELOPE ──
 // Ledger creations (<LEDGER ACTION="Create">) are deduplicated and placed first,
 // followed by all vouchers, so Tally creates each new ledger only once.
-function mergeXMLResults(xmlParts, companyName, knownLedgerNames) {
+function mergeXMLResults(xmlParts) {
   const ledgerBlocks = new Map(); // key: ledger name, value: full TALLYMESSAGE block
   const voucherBlocks = [];
-  let company = companyName || '';
-  knownLedgerNames = knownLedgerNames || [];
+  let company = '';
 
   for (const xml of xmlParts) {
     if (!xml) continue;
@@ -983,206 +841,6 @@ function mergeXMLResults(xmlParts, companyName, knownLedgerNames) {
 
   const allBlocks = [...ledgerBlocks.values(), ...renumbered];
 
-  // ── GENERIC LEDGER NAME NORMALIZATION ──
-  // Collapses near-duplicate ledger names (case variants, account-number/suffix
-  // variants) into one canonical form, without hardcoding any specific bank/
-  // vendor/person name. Works by comparing "core keys" (lowercase, alphanumeric
-  // only) and grouping names where one core key is a prefix of another.
-  let merged = allBlocks.join('\n');
-  {
-    const coreKey = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-    // 1. Collect every ledger name used (from LEDGERNAME tags and LEDGER NAME="" attrs)
-    const allNames = [];
-    const collectRegexes = [
-      /<LEDGERNAME>([^<]+)<\/LEDGERNAME>/g,
-      /<LEDGER NAME="([^"]+)"/g
-    ];
-    for (const re of collectRegexes) {
-      let m;
-      while ((m = re.exec(merged)) !== null) allNames.push(m[1]);
-    }
-
-    // 2. Group raw names by their core key
-    const byKey = new Map(); // coreKey -> Set of raw names
-    for (const name of allNames) {
-      const k = coreKey(name);
-      if (!k) continue;
-      if (!byKey.has(k)) byKey.set(k, new Set());
-      byKey.get(k).add(name);
-    }
-
-    // 3. Merge groups where one key is a prefix of another (shortest key wins as group anchor)
-    const sortedKeys = [...byKey.keys()].sort((a, b) => a.length - b.length);
-    const repOf = new Map(); // coreKey -> representative coreKey
-    for (const k of sortedKeys) {
-      if (repOf.has(k)) continue;
-      let rep = k;
-      for (const existingRep of new Set(repOf.values())) {
-        if (k.startsWith(existingRep) || existingRep.startsWith(k)) { rep = existingRep; break; }
-      }
-      repOf.set(k, rep);
-    }
-    const groups = new Map(); // rep -> Set of raw names
-    for (const [k, names] of byKey.entries()) {
-      const rep = repOf.get(k);
-      if (!groups.has(rep)) groups.set(rep, new Set());
-      for (const n of names) groups.get(rep).add(n);
-    }
-
-    // 4. For each group with >1 distinct name, pick a canonical (prefer non-ALLCAPS, then shortest)
-    const VARIANT_MAP = {};
-    for (const names of groups.values()) {
-      if (names.size <= 1) continue;
-      const arr = [...names];
-      let canonical = arr[0];
-      for (const n of arr.slice(1)) {
-        const canIsAllCaps = canonical === canonical.toUpperCase() && /[A-Z]/.test(canonical);
-        const nIsAllCaps = n === n.toUpperCase() && /[A-Z]/.test(n);
-        if (canIsAllCaps && !nIsAllCaps) canonical = n;
-        else if (!canIsAllCaps && !nIsAllCaps && n.length < canonical.length) canonical = n;
-        else if (canIsAllCaps && nIsAllCaps && n.length < canonical.length) canonical = n;
-      }
-      for (const n of arr) {
-        if (n !== canonical) VARIANT_MAP[n] = canonical;
-      }
-    }
-
-    // 5. Apply Stage-1 replacements (longest variant strings first to avoid partial-overlap issues)
-    const sortedVariants = Object.keys(VARIANT_MAP).sort((a, b) => b.length - a.length);
-    for (const variant of sortedVariants) {
-      const canonical = VARIANT_MAP[variant];
-      merged = merged.split(`>${variant}<`).join(`>${canonical}<`)
-                      .split(`"${variant}"`).join(`"${canonical}"`);
-    }
-
-    // ── STAGE 2: FUZZY NAME MATCHING ──
-    // Catches variants Stage 1 can't (different abbreviations of the same
-    // business name, e.g. "Nawaes Almadina Sprmkt" vs "Nawaes Al Madina SMT").
-    // Works by stripping common generic business-type words (supermarket,
-    // restaurant, cafe, llc, etc. — and their common abbreviations) from each
-    // name, then comparing the remaining "core business name" via edit-distance
-    // similarity. Two names are merged only if their core business names are
-    // near-identical (>= 0.85 similarity) AND that core is non-trivial (>= 4 chars),
-    // to avoid accidentally merging unrelated short/generic names.
-    {
-      const levenshtein = (a, b) => {
-        const m = a.length, n = b.length;
-        if (m === 0) return n;
-        if (n === 0) return m;
-        const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-        for (let i = 0; i <= m; i++) dp[i][0] = i;
-        for (let j = 0; j <= n; j++) dp[0][j] = j;
-        for (let i = 1; i <= m; i++) {
-          for (let j = 1; j <= n; j++) {
-            dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1]
-                                          : 1 + Math.min(dp[i-1][j-1], dp[i-1][j], dp[i][j-1]);
-          }
-        }
-        return dp[m][n];
-      };
-      const simRatio = (a, b) => {
-        const maxLen = Math.max(a.length, b.length);
-        return maxLen === 0 ? 1 : 1 - levenshtein(a, b) / maxLen;
-      };
-      // Generic business-type tokens and their common abbreviations — stripped
-      // before comparison so e.g. "Sprmkt"/"SMT"/"Supermarket" all reduce away.
-      const GENERIC_TOKENS = new Set([
-        'llc', 'll', 'l', 'lc', 'co', 'company', 'fzc', 'fze', 'fzco', 'plc', 'ltd',
-        'trading', 'general', 'est', 'establishment',
-        'supermarket', 'supermkt', 'sprmkt', 'smt', 'mkt', 'market',
-        'restaurant', 'restaura', 'rest', 'resto',
-        'cafe', 'cafte', 'cafeteria', 'caf',
-        'hotel', 'group', 'enterprises', 'enterprise',
-        'the', 'and', 'of'
-      ]);
-      const fusedCore = name => {
-        const t = name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
-          .filter(tok => !GENERIC_TOKENS.has(tok));
-        return t.join('');
-      };
-
-      // Re-collect current (post-Stage-1) ledger names
-      const currentNames = new Set();
-      const re2 = /<LEDGERNAME>([^<]+)<\/LEDGERNAME>|<LEDGER NAME="([^"]+)"/g;
-      let mm;
-      while ((mm = re2.exec(merged)) !== null) currentNames.add(mm[1] || mm[2]);
-
-      // Build fused-core map, group names whose fused cores are near-identical
-      const arr = [...currentNames];
-      const fused = arr.map(fusedCore);
-      const used = new Array(arr.length).fill(false);
-      const FUZZY_MAP = {};
-      for (let i = 0; i < arr.length; i++) {
-        if (used[i] || fused[i].length < 4) continue;
-        const groupIdx = [i];
-        for (let j = i + 1; j < arr.length; j++) {
-          if (used[j] || fused[j].length < 4) continue;
-          if (simRatio(fused[i], fused[j]) >= 0.85) groupIdx.push(j);
-        }
-        if (groupIdx.length > 1) {
-          // pick canonical: prefer non-ALLCAPS, then shortest original name
-          let canonical = arr[groupIdx[0]];
-          for (const gi of groupIdx.slice(1)) {
-            const n = arr[gi];
-            const canIsAllCaps = canonical === canonical.toUpperCase() && /[A-Z]/.test(canonical);
-            const nIsAllCaps = n === n.toUpperCase() && /[A-Z]/.test(n);
-            if (canIsAllCaps && !nIsAllCaps) canonical = n;
-            else if (!canIsAllCaps && !nIsAllCaps && n.length < canonical.length) canonical = n;
-            else if (canIsAllCaps && nIsAllCaps && n.length < canonical.length) canonical = n;
-          }
-          for (const gi of groupIdx) {
-            used[gi] = true;
-            if (arr[gi] !== canonical) FUZZY_MAP[arr[gi]] = canonical;
-          }
-        }
-      }
-
-      const sortedFuzzy = Object.keys(FUZZY_MAP).sort((a, b) => b.length - a.length);
-      for (const variant of sortedFuzzy) {
-        const canonical = FUZZY_MAP[variant];
-        merged = merged.split(`>${variant}<`).join(`>${canonical}<`)
-                        .split(`"${variant}"`).join(`"${canonical}"`);
-      }
-    }
-  }
-
-  // Re-dedupe ledger creation blocks after normalization (keep first occurrence only)
-  const seenLedgers = new Set();
-  merged = merged.replace(/<TALLYMESSAGE[^>]*>\s*<LEDGER NAME="([^"]+)"[\s\S]*?<\/TALLYMESSAGE>\s*/g, (block, name) => {
-    if (seenLedgers.has(name)) return '';
-    seenLedgers.add(name);
-    return block;
-  });
-
-  // Safety net: Tally Prime requires <NAME.LIST><NAME>...</NAME></NAME.LIST> inside
-  // every <LEDGER ACTION="Create"> block, or it imports as "MISSING_MASTER_NAME"
-  // and every voucher referencing that ledger fails as "Referenced master is missing".
-  // Inject it if the model omitted it.
-  merged = merged.replace(/<LEDGER NAME="([^"]+)"([^>]*ACTION="Create"[^>]*)>([\s\S]*?)<\/LEDGER>/g, (block, name, attrs, inner) => {
-    if (/<NAME\.LIST>/.test(inner)) return block; // already present
-    const escaped = name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    return `<LEDGER NAME="${name}"${attrs}><NAME.LIST><NAME>${escaped}</NAME></NAME.LIST>${inner}</LEDGER>`;
-  });
-
-  // Safety net: auto-create masters for any ledger referenced by a voucher
-  // (LEDGERNAME / PARTYLEDGERNAME) that has no <LEDGER ACTION="Create"> block
-  // AND does not already exist in the uploaded Ledger Master. Without this,
-  // Tally throws "Referenced master is missing" for that ledger on every
-  // voucher that uses it. Standard ledgers (bank, cash, tax, suspense, and
-  // common P&L heads) are assumed to already exist and are skipped — only
-  // genuinely new vendor/party names not covered anywhere get auto-created.
-  merged = autoCreateMissingLedgerMasters(merged, knownLedgerNames);
-
-  // Normalize VCHTYPE / VOUCHERTYPENAME — strip trailing " Voucher" if present
-  merged = merged
-    .replace(/VCHTYPE="(Payment|Receipt|Contra) Voucher"/g, 'VCHTYPE="$1"')
-    .replace(/<VOUCHERTYPENAME>(Payment|Receipt|Contra) Voucher<\/VOUCHERTYPENAME>/g, '<VOUCHERTYPENAME>$1</VOUCHERTYPENAME>');
-
-  // Normalize debit/credit sign convention to match the reference convention
-  // (see flipLedgerEntrySigns for details)
-  merged = flipLedgerEntrySigns(merged);
-
   return `<?xml version="1.0" encoding="UTF-8"?>
 <ENVELOPE>
 <HEADER>
@@ -1197,7 +855,7 @@ function mergeXMLResults(xmlParts, companyName, knownLedgerNames) {
 </STATICVARIABLES>
 </REQUESTDESC>
 <REQUESTDATA>
-${merged}
+${allBlocks.join('\n')}
 </REQUESTDATA>
 </IMPORTDATA>
 </BODY>
@@ -1210,33 +868,44 @@ const INSTR = {
 
 ═══ STRUCTURE REQUIREMENTS ═══
 1. Root: <ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>All Masters</REPORTNAME>... <REQUESTDATA>
-2. If you identify a counterparty (a named person/company that is not already a standard ledger) that needs a new ledger — e.g. a loan party, a new supplier, a new customer — output a <LEDGER ACTION="Create"> TALLYMESSAGE block FIRST, before any vouchers reference it. CRITICAL: it MUST include a <NAME.LIST><NAME>...</NAME></NAME.LIST> element with the exact same name as the NAME="" attribute — Tally Prime will not recognize the ledger without it (it will show as "MISSING_MASTER_NAME" and cause import exceptions). Use exactly this structure:
-   <LEDGER NAME="..." ACTION="Create"><NAME.LIST><NAME>...</NAME></NAME.LIST><PARENT>...</PARENT><ISBILLWISEON>No</ISBILLWISEON><OPENINGBALANCE>0</OPENINGBALANCE></LEDGER>
-   (Replace both "..." in NAME="..." and <NAME>...</NAME> with the identical ledger name.)
+2. If you identify a counterparty (a named person/company that is not already a standard ledger) that needs a new ledger — e.g. a loan party, a new supplier, a new customer — output a <LEDGER ACTION="Create"> TALLYMESSAGE block FIRST, before any vouchers reference it. Use:
+   <LEDGER NAME="..." ACTION="Create"><PARENT>...</PARENT><ISBILLWISEON>No</ISBILLWISEON><OPENINGBALANCE>0</OPENINGBALANCE></LEDGER>
    Choose PARENT based on context: loans received from individuals → "Unsecured Loans"; new suppliers → "Sundry Creditors"; new customers → "Sundry Debtors"; new expense types → "Indirect Expenses".
 3. Each VOUCHER must include: REMOTEID="" VCHKEY="" attributes, <DATE>, <EFFECTIVEDATE> (same as DATE unless stated otherwise), <VOUCHERTYPENAME>, <VOUCHERNUMBER> (sequential: 1, 2, 3...), <PARTYLEDGERNAME> (the non-bank ledger in the transaction), <NARRATION>.
 4. Ledger entries use tag <ALLLEDGERENTRIES.LIST> (not <LEDGERENTRIES.LIST>).
 
 ═══ SIGN CONVENTION — CRITICAL, GET THIS EXACTLY RIGHT ═══
-- RECEIPT (money IN to bank): Bank ledger ISDEEMEDPOSITIVE=Yes, Amount POSITIVE. Other-side ledger ISDEEMEDPOSITIVE=No, Amount NEGATIVE.
-- PAYMENT (money OUT of bank): Bank ledger ISDEEMEDPOSITIVE=No, Amount NEGATIVE. Other-side (expense/party) ledger ISDEEMEDPOSITIVE=Yes, Amount POSITIVE.
-- CONTRA (bank↔cash or bank↔bank transfer): Destination account ISDEEMEDPOSITIVE=Yes, Amount POSITIVE. Source account ISDEEMEDPOSITIVE=No, Amount NEGATIVE.
-- Every voucher's two entries must have EXACTLY opposite Amount values (e.g. +1000 and -1000) and opposite ISDEEMEDPOSITIVE flags. Never violate this — it must always balance to zero.
+
+RECEIPT voucher (money coming IN to bank account):
+  Entry 1 — Bank ledger:   <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>  <AMOUNT>1000</AMOUNT>   (POSITIVE)
+  Entry 2 — Party/Income:  <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>   <AMOUNT>-1000</AMOUNT>  (NEGATIVE)
+
+PAYMENT voucher (money going OUT of bank account):
+  Entry 1 — Expense/Party: <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>  <AMOUNT>1000</AMOUNT>   (POSITIVE)
+  Entry 2 — Bank ledger:   <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>   <AMOUNT>-1000</AMOUNT>  (NEGATIVE)
+
+CONTRA voucher (transfer between bank/cash accounts):
+  Entry 1 — Destination:   <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>  <AMOUNT>500</AMOUNT>    (POSITIVE)
+  Entry 2 — Source:        <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>   <AMOUNT>-500</AMOUNT>   (NEGATIVE)
+
+RULES — never break these:
+- One entry must always be ISDEEMEDPOSITIVE=Yes with a POSITIVE amount
+- The other entry must always be ISDEEMEDPOSITIVE=No with a NEGATIVE amount (same absolute value)
+- The two AMOUNT values must always sum to zero (e.g. 1000 + (-1000) = 0)
+- NEVER set both entries to ISDEEMEDPOSITIVE=No — the voucher will not balance
+- NEVER set both AMOUNT values to negative — Tally will reject the import
 
 ═══ VOUCHER TYPE RULES ═══
-- Credit entries (money IN) → VCHTYPE="Receipt" and VOUCHERTYPENAME="Receipt"
-- Debit entries (money OUT) → VCHTYPE="Payment" and VOUCHERTYPENAME="Payment"
-- Transfers between the company's own bank/cash accounts → VCHTYPE="Contra" and VOUCHERTYPENAME="Contra"
-- CRITICAL: VCHTYPE and VOUCHERTYPENAME must be EXACTLY one of "Payment", "Receipt", "Contra" — NEVER append the word "Voucher" (e.g. "Payment Voucher" is WRONG; use "Payment")
-- CONTRA — narrow definition: use VCHTYPE="Contra" ONLY for genuine self-transfers between the company's own accounts — e.g. "CASH DEPOSIT", "ATM CASH DEPOSIT", "CASH WITHDRAWAL", "FUNDS TRANSFER TO OWN ACCOUNT", "TRANSFER BETWEEN A/C". If the transaction has any external party name, supplier, customer, or purchase/sale description — even if money moves between bank and cash — it is a Payment or Receipt, NOT Contra. When uncertain, prefer Payment/Receipt over Contra.
+- Credit entries (money IN) → Receipt Vouchers
+- Debit entries (money OUT) → Payment Vouchers
+- Transfers between the company's own bank/cash accounts → Contra Vouchers
 - VAT payments → "VAT Payable"
 - Salary payments → "Salaries & Wages"
 - Bank/forex charges → "Bank Charges" (PARENT: Indirect Expenses)
 - Rent → "Rent Expense"
 - Professional fees received → "Professional Fees Income" or "Consulting Fees"
-- Loan received from a named individual/entity → create that person/entity as a ledger under "Unsecured Loans" and use as PARTYLEDGERNAME — do NOT dump to Suspense Account if a name is identifiable AND the user has not instructed otherwise (see DEFAULT vs USER OVERRIDE note below). This applies specifically to "AANI FROM/TO [person name]", "INWARD T/T [person name]", or similar transfers where a person's full name is clearly stated and they appear repeatedly — classify their ledger under "Unsecured Loans", NOT "Sundry Creditors" or "Sundry Debtors".
-- DEFAULT (no relevant user instruction): for purchase/POS transactions (e.g. "PURCHASE TRXN. <VENDOR NAME> <LOCATION>"), extract the merchant/vendor name and create that vendor as a new ledger under "Sundry Creditors" if not already in the Ledger Master, rather than using a generic "Sundry Expenses"/"General Expenses"/"Miscellaneous Expenses" catch-all.
-- USER OVERRIDE — IF the USER CLASSIFICATION RULES say something like "post uncategorised ledgers to Suspense Account" or "everything not in the ledger master goes to Suspense": this means Suspense Account is the INTENDED category for any counterparty NOT already present in the uploaded Ledger Master — do NOT create new per-vendor Sundry Creditors ledgers for individual purchase/POS transactions in that case. Only create a new ledger for a counterparty when the user's rules explicitly call for it (e.g. a named loan party who appears repeatedly with large amounts, per "classify per the ledger master" + context). When this override is active, "uncategorised" means "not in the Ledger Master" — route those straight to "Suspense Account", which already exists in the master, rather than inventing new ledgers.
+- Loan received from a named individual/entity → create that person/entity as a ledger under "Unsecured Loans" and use as PARTYLEDGERNAME — do NOT dump to Suspense Account if a name is identifiable
+- Only use "Suspense Account" when the transaction description gives genuinely no identifiable counterparty
 
 ═══ NARRATION FORMAT ═══
 Format every narration as: "<description> - <reference> | Ref: <reference> | Date: <DD-Mon-YYYY>"
@@ -1245,12 +914,6 @@ Move the bank's original reference number out of VOUCHERNUMBER and into the narr
 
 ═══ LEDGER MATCHING ═══
 If a TALLY LEDGER MASTER is provided, you MUST use the EXACT existing ledger name from that list whenever a transaction matches it — even if wording differs slightly (e.g. "WIO Bank A/C 5690" in the master → use that, not "WIO Bank - 5690"). Match by meaning, not exact string. NEVER create a new ledger if a reasonable match already exists. Only create new ledgers (via <LEDGER ACTION="Create">) for genuinely new counterparties not in the master.
-
-═══ CONSISTENCY ACROSS CHUNKS — CRITICAL ═══
-- The bank account ledger name MUST be IDENTICAL in every voucher across the entire output — pick ONE name and use it everywhere. If a Ledger Master is provided, use that exact name. If NOT provided, use the bank's simplest commonly-recognized short name (e.g. prefer "ABC Bank" over verbose variants like "ABC Bank - Current A/c", "ABC Bank A/C 1234567", or "ABC Bank Current Account" — pick the shortest form and apply it consistently to every voucher).
-- The cash ledger MUST always use ONE consistent name throughout (e.g. always "Cash" — never switch between "Cash", "Cash in Hand", "Cash-in-Hand", and "Cash In Hand" across different vouchers).
-- Person/company names used as ledger names MUST use consistent capitalization throughout (pick one casing — e.g. Title Case — and never switch to ALL CAPS for the same entity) and MUST be assigned to exactly ONE parent group throughout (never assign the same entity to both "Sundry Debtors" and "Sundry Creditors" in different chunks).
-- For the SAME vendor/merchant/counterparty appearing in multiple transactions across the file, use the EXACT SAME ledger name every time — never create one as a named entity in one place and a generic catch-all ledger in another.
 
 ═══ OTHER ═══
 - If USER CLASSIFICATION RULES are provided, follow them strictly — they override all defaults above
@@ -1327,23 +990,10 @@ async function generate() {
 
     // Ledger master — text only in instrText; PDF handled per-chunk
     let ledgerCtx = '';
-    let knownLedgerNames = [];
     if (S.ledgerFile && !isPDF(S.ledgerFile)) {
       const lt = await excelToText(S.ledgerFile);
-      if (lt.trim()) {
-        ledgerCtx = `\n\n=== TALLY LEDGER MASTER (existing ledgers in this company) ===\n${lt.slice(0, 12000)}\n=== END LEDGER MASTER ===`;
-        // Extract candidate ledger names: take the first non-empty cell/column
-        // of each line (ledger-master exports are typically "Name, Group, ..."
-        // or "Name\tGroup\t..."). Skip obvious header/blank/numeric-only rows.
-        knownLedgerNames = lt.split('\n')
-          .map(line => line.split(/\t|,(?=\s*[A-Za-z])/)[0].trim())
-          .filter(name => name && name.length >= 2 && /[A-Za-z]/.test(name))
-          .filter(name => !/^(name|ledger|account|particulars|ledger\s*name|account\s*name|particulars\s*name)$/i.test(name));
-      }
+      if (lt.trim()) ledgerCtx = `\n\n=== TALLY LEDGER MASTER (existing ledgers in this company) ===\n${lt.slice(0, 12000)}\n=== END LEDGER MASTER ===`;
     }
-    // Note: for PDF ledger masters, names can't be extracted client-side —
-    // knownLedgerNames stays empty and the auto-create safety net relies
-    // solely on this run's own <LEDGER ACTION="Create"> blocks in that case.
 
     // Build instruction text
     const vatNote = vatOn ? ' Apply UAE VAT 5% split where applicable.' : '';
@@ -1457,35 +1107,10 @@ async function generate() {
 
     // ── MERGE CHUNKS ──
     document.getElementById('loaderText').textContent = 'Merging results…';
-    let xml = totalChunks > 1 ? mergeXMLResults(xmlParts, company, knownLedgerNames) : xmlParts[0];
+    let xml = totalChunks > 1 ? mergeXMLResults(xmlParts) : xmlParts[0];
     xml = (xml || '').replace(/^```(?:xml)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
 
     xml = xml.replace(/^```(?:xml)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
-
-    // Normalize VCHTYPE / VOUCHERTYPENAME — strip stray " Voucher" suffix (also applies to single-chunk output)
-    xml = xml
-      .replace(/VCHTYPE="(Payment|Receipt|Contra) Voucher"/g, 'VCHTYPE="$1"')
-      .replace(/<VOUCHERTYPENAME>(Payment|Receipt|Contra) Voucher<\/VOUCHERTYPENAME>/g, '<VOUCHERTYPENAME>$1</VOUCHERTYPENAME>');
-
-    // Safety net: ensure every <LEDGER ACTION="Create"> has <NAME.LIST><NAME>...</NAME></NAME.LIST>
-    // (Tally Prime requires this or the master imports as "MISSING_MASTER_NAME")
-    xml = xml.replace(/<LEDGER NAME="([^"]+)"([^>]*ACTION="Create"[^>]*)>([\s\S]*?)<\/LEDGER>/g, (block, name, attrs, inner) => {
-      if (/<NAME\.LIST>/.test(inner)) return block;
-      const escaped = name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      return `<LEDGER NAME="${name}"${attrs}><NAME.LIST><NAME>${escaped}</NAME></NAME.LIST>${inner}</LEDGER>`;
-    });
-
-    // Safety net: auto-create masters for any ledger referenced but not created
-    // and not already in the uploaded Ledger Master (prevents "Referenced master is missing")
-    xml = autoCreateMissingLedgerMasters(xml, knownLedgerNames);
-
-    // Normalize debit/credit sign convention to match the reference convention.
-    // NOTE: for multi-chunk output, mergeXMLResults() already applies this flip
-    // internally — applying it again here would cancel it out (flip is self-inverse).
-    // Only apply here for the single-chunk path.
-    if (totalChunks <= 1) {
-      xml = flipLedgerEntrySigns(xml);
-    }
 
     console.log('=== TALLY XML PREVIEW (first 600 chars) ===');
     console.log(xml.slice(0, 600));
